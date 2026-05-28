@@ -1,0 +1,11 @@
+{
+  "holdDelayMs": 250,
+  "triggerKey": "capsLock",
+  "bindings": [
+    { "key": "T", "bundleId": "com.apple.Terminal", "label": "Terminal" },
+    { "key": "F", "bundleId": "com.apple.finder", "label": "Finder" },
+    { "key": "C", "bundleId": "com.apple.Calendar", "label": "Calendar" },
+    { "key": "M", "bundleId": "com.apple.mail", "label": "Mail" },
+    { "key": "S", "bundleId": "com.apple.Safari", "label": "Safari" }
+  ]
+}
