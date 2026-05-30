@@ -64,4 +64,35 @@ else
     echo "    Gatekeeper: WARN (notarization may still be propagating, or this is an ad-hoc build)"
 fi
 
+# Generate Sparkle appcast.xml so existing installs see this build. The EdDSA
+# private key is read from the user's Keychain (where 'generate_keys' put it
+# during one-time setup) — same as ko-nav. Ad-hoc builds skip this because they
+# aren't shipped via Sparkle.
+APPCAST="$ROOT/build/appcast.xml"
+GENERATE_APPCAST="$ROOT/.build/artifacts/sparkle/Sparkle/bin/generate_appcast"
+DOWNLOAD_URL_PREFIX="${SPARKLE_DOWNLOAD_URL_PREFIX:-https://keyghost.lukeboyle.com/}"
+
+if [ ! -x "$GENERATE_APPCAST" ]; then
+    echo "→ skip appcast (generate_appcast missing — run 'swift build' once to fetch Sparkle artifacts)"
+elif [ "$SIGNING_IDENTITY" = "-" ]; then
+    echo "→ skip appcast (ad-hoc builds aren't shipped via Sparkle)"
+else
+    echo "→ generate appcast.xml (download URL prefix: $DOWNLOAD_URL_PREFIX)"
+    rm -f "$APPCAST"
+    # generate_appcast scans the build dir; remove any old DMGs so only the
+    # current one is published in the feed.
+    find "$ROOT/build" -maxdepth 1 -name "*.dmg" -not -name "$(basename "$DMG")" -delete
+
+    "$GENERATE_APPCAST" \
+        --download-url-prefix "$DOWNLOAD_URL_PREFIX" \
+        "$ROOT/build" 2>&1 | sed 's/^/    /'
+
+    if [ -f "$APPCAST" ]; then
+        echo "    appcast.xml: $(wc -l < "$APPCAST") lines"
+    else
+        echo "✖ appcast.xml was not generated" >&2
+        exit 1
+    fi
+fi
+
 echo "✓ built $DMG ($(du -h "$DMG" | cut -f1))"

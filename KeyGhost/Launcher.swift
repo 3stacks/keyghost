@@ -1,7 +1,7 @@
 import AppKit
 import os
 
-private let log = Logger(subsystem: "com.kogroup.keyghost", category: "launcher")
+private let log = Logger(subsystem: "com.lukeboyle.keyghost", category: "launcher")
 
 enum Launcher {
     static func launch(bundleId: String) {

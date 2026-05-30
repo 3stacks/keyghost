@@ -1,38 +1,25 @@
 # KeyGhost
 
-A macOS menu-bar app that turns Caps Lock (or any other trigger key)
-into a launcher with a visual cheatsheet. Hold the trigger and a
-translucent keyboard fades in showing the app icon bound to each key.
-Press a bound letter while the trigger is held and the app launches
-immediately — the chord is consumed so it never reaches your focused
-window.
+A macOS menu-bar app that turns Caps Lock (or any other trigger key) into
+a launcher with a visual cheatsheet. Hold the trigger and a translucent
+keyboard fades in showing the app icon bound to each key. Press a bound
+letter while the trigger is held and the app launches immediately — the
+chord is consumed so it never reaches your focused window.
 
 KeyGhost reads the trigger key directly from the HID layer, beneath any
 modifier remapping (Hyperkey, Karabiner, macOS Modifier Keys), so it
 works regardless of how you've configured your "hyper" key.
 
-## Build
+<!-- TODO: replace with a real demo gif/screenshot at assets/demo.gif -->
+<!-- ![KeyGhost overlay](assets/demo.gif) -->
 
-```sh
-swift run                                 # debug build, run in-place
-./scripts/build-app.sh                    # release .app at build/KeyGhost.app
-./scripts/build-dmg.sh                    # also packages a DMG
-./scripts/build-dmg.sh --skip-notarize    # skip the notarytool wait
-```
+## Install
 
-By default the scripts ad-hoc-sign. Pass `SIGNING_IDENTITY` (and
-`TEAM_ID` / `NOTARY_PROFILE`) to sign with your own Developer ID:
+Download the latest signed DMG from
+[Releases](https://github.com/3stacks/keyghost/releases), drag
+`KeyGhost.app` to `/Applications`, and launch it.
 
-```sh
-SIGNING_IDENTITY="Developer ID Application: Your Org (TEAMID)" \
-TEAM_ID="TEAMID" \
-NOTARY_PROFILE="notarytool-profile" \
-./scripts/build-dmg.sh
-```
-
-Ad-hoc signatures change on every rebuild, so the Accessibility and
-Input Monitoring grants don't survive `./scripts/build-app.sh` runs. A
-Developer ID identity gives a stable signature and the grants stick.
+Or build from source — see [Building from source](#building-from-source).
 
 ## First-run setup
 
@@ -81,7 +68,7 @@ Menu bar → **Settings…** (or ⌘,) opens an editor with:
 | `bindings[].bundleId` | Application bundle identifier — `osascript -e 'id of app "Terminal"'` |
 | `bindings[].url` | Optional URL to open. With `bundleId`, opens in that specific app (Chrome for Gmail). Without, uses the system default |
 | `bindings[].label` | Small caption beneath the icon |
-| `bindings[].passthrough` | Display the icon on the overlay but let the chord through to the OS, so an already-registered hotkey owner (Maccy, KO Nav, Shortcuts.app) handles it. KeyGhost rewrites the event flags to the full `⌃⌥⇧⌘` chord before passing it through |
+| `bindings[].passthrough` | Display the icon on the overlay but let the chord through to the OS, so an already-registered hotkey owner (Maccy, Raycast, Shortcuts.app) handles it. KeyGhost rewrites the event flags to the full `⌃⌥⇧⌘` chord before passing it through |
 
 The file is live-watched, so saving refreshes the next overlay
 invocation.
@@ -107,6 +94,107 @@ invocation.
   `NSWorkspace.icon(forFile:)`, so they always reflect the installed
   app's current icon.
 
+## Building from source
+
+Requires Xcode 15+ (Swift 5.9, macOS 14 SDK).
+
+```sh
+swift run                                 # debug build, run in-place
+./scripts/build-app.sh                    # release .app at build/KeyGhost.app
+./scripts/build-dmg.sh                    # also packages a DMG
+./scripts/build-dmg.sh --skip-notarize    # skip the notarytool wait
+```
+
+By default the scripts ad-hoc-sign. Pass `SIGNING_IDENTITY` (and
+`TEAM_ID` / `NOTARY_PROFILE`) to sign with your own Developer ID:
+
+```sh
+SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+TEAM_ID="TEAMID" \
+NOTARY_PROFILE="notarytool-profile" \
+./scripts/build-dmg.sh
+```
+
+Ad-hoc signatures change on every rebuild, so the Accessibility and
+Input Monitoring grants don't survive `./scripts/build-app.sh` runs. A
+Developer ID identity gives a stable signature and the grants stick.
+
+## Releasing
+
+Releases run locally from a machine with the signing keychain set up
+(no GitHub Actions). The flow is the same as `~/ko-work/Sites/ko-nav`:
+build → sign → notarize → generate appcast → upload to R2 → cut a
+GitHub Release.
+
+Existing installs poll `https://keyghost.lukeboyle.com/appcast.xml` and
+self-update via Sparkle ("Check for Updates…" in the menu bar, or on the
+automatic schedule).
+
+### One-time setup
+
+Done once per machine. All secrets live in the local Keychain or in
+`wrangler`'s config — nothing in the repo, nothing in GitHub secrets.
+
+1. **Import the Developer ID Application certificate** into your login
+   Keychain (Xcode → Settings → Accounts → Manage Certificates, or
+   double-click the .p12 export).
+
+2. **Register a notarytool keychain profile** so the build script can
+   submit without prompting:
+
+   ```sh
+   xcrun notarytool store-credentials notarytool-profile \
+       --apple-id you@example.com \
+       --team-id TEAMID \
+       --password APP_SPECIFIC_PASSWORD
+   ```
+
+3. **Generate the Sparkle EdDSA signing keypair** (after running
+   `swift build` at least once so the Sparkle artifacts are present):
+
+   ```sh
+   ./.build/artifacts/sparkle/Sparkle/bin/generate_keys
+   ```
+
+   The private key is stored in your Keychain — `generate_appcast` finds
+   it automatically. Copy the public key it prints into
+   `Bundle/Info.plist` (replace `__SU_PUBLIC_ED_KEY__` under
+   `SUPublicEDKey`) and commit that one-line change.
+
+4. **Authenticate wrangler** for R2 uploads:
+
+   ```sh
+   bun install
+   bunx wrangler login
+   ```
+
+5. **Attach the custom domain** `keyghost.lukeboyle.com` to the R2
+   bucket `keyghost` in the Cloudflare dashboard (R2 → bucket →
+   Settings → Custom Domains). `SUFeedURL` and the appcast download
+   URLs both rely on this.
+
+### Cutting a release
+
+```sh
+VERSION=0.2.0
+SIGNING_IDENTITY="Developer ID Application: Luke Boyle (TEAMID)" \
+TEAM_ID="TEAMID" \
+VERSION="$VERSION" \
+./scripts/build-dmg.sh                  # build + sign + notarize + appcast
+
+VERSION="$VERSION" CLOUDFLARE_ACCOUNT_ID=66bbbf59d9ee8948f770553dfc0d5721 \
+./scripts/upload-r2.sh                  # publish DMG + appcast to R2
+
+gh release create "v$VERSION" \
+    "build/KeyGhost-$VERSION.dmg" \
+    "build/appcast.xml" \
+    --title "KeyGhost v$VERSION" \
+    --generate-notes
+```
+
+The notarize step is what takes the most time (~3–10 minutes waiting
+on Apple). Everything else is local.
+
 ## Layout
 
 ```
@@ -131,10 +219,17 @@ keyghost/
 │   ├── Info.plist                  # template (LSUIElement, bundle id, version)
 │   └── Entitlements.plist          # apple-events for NSWorkspace launches
 ├── scripts/
-│   ├── build-app.sh                # release build → KeyGhost.app
-│   └── build-dmg.sh                # signed + notarized DMG
+│   ├── build-app.sh                # release build → KeyGhost.app (embeds Sparkle.framework)
+│   ├── build-dmg.sh                # signed + notarized DMG + Sparkle appcast.xml
+│   └── upload-r2.sh                # publishes DMG + appcast to Cloudflare R2
+├── package.json                    # wrangler devDep (used by upload-r2.sh)
 └── Package.swift
 ```
+
+## Contributing
+
+Bug reports and PRs welcome. For non-trivial changes please open an
+issue first to discuss the approach.
 
 ## License
 

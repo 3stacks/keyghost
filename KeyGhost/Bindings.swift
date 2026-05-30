@@ -12,7 +12,7 @@ struct KeyBinding: Codable, Hashable {
     let url: String?
 
     /// True if KeyGhost should display the icon but let the chord through to
-    /// the OS (so a registered hotkey owner — Maccy, KONav, Shortcuts — handles it).
+    /// the OS (so a registered hotkey owner — Maccy, Raycast, Shortcuts — handles it).
     var isPassthrough: Bool { passthrough == true }
 }
 

@@ -2,7 +2,7 @@ import AppKit
 import CoreGraphics
 import os
 
-private let log = Logger(subsystem: "com.kogroup.keyghost", category: "chord")
+private let log = Logger(subsystem: "com.lukeboyle.keyghost", category: "chord")
 
 /// Watches CGEvent keyDown events for hyper chords (e.g. ⌘⌥⌃⇧+letter) and
 /// dispatches them to the launcher. The "is hyper held?" trigger lives in
@@ -12,7 +12,7 @@ enum ChordOutcome {
     /// KeyGhost handled it; swallow the original event.
     case swallow
     /// Let the event through but OR these modifier bits into its flags first,
-    /// so downstream hotkey handlers (KONav, Maccy, Shortcuts.app) see the
+    /// so downstream hotkey handlers (Maccy, Raycast, Shortcuts.app) see the
     /// full chord they registered for.
     case rewriteFlags(CGEventFlags)
     /// No matching binding; pass through unchanged.
