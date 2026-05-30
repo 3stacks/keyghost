@@ -3,7 +3,16 @@
   "triggerKey": "capsLock",
   "bindings": [
     { "key": "T", "bundleId": "com.apple.Terminal", "label": "Terminal" },
-    { "key": "F", "bundleId": "com.apple.finder", "label": "Finder" },
+    {
+      "key": "F",
+      "bundleId": "com.google.Chrome",
+      "label": "Chrome",
+      "nested": {
+        "up":    { "bundleId": "com.google.Chrome", "url": "https://mail.google.com",     "label": "Gmail" },
+        "right": { "bundleId": "com.google.Chrome", "url": "https://calendar.google.com", "label": "Calendar" },
+        "down":  { "bundleId": "com.google.Chrome", "url": "https://github.com",          "label": "GitHub" }
+      }
+    },
     { "key": "C", "bundleId": "com.apple.Calendar", "label": "Calendar" },
     { "key": "M", "bundleId": "com.apple.mail", "label": "Mail" },
     { "key": "S", "bundleId": "com.apple.Safari", "label": "Safari" }
