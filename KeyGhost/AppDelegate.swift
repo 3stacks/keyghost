@@ -167,12 +167,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         holdWorkItem?.cancel()
         holdWorkItem = nil
 
+        let wasInNested = nestedActiveBinding != nil
         // Nested chord open → commit the selection (or root fallback) on release.
-        if nestedActiveBinding != nil {
+        if wasInNested {
             exitNestedMode(execute: true)
         }
 
-        if didShowOverlay {
+        // Dismiss whichever overlay variant is up — the main keyboard or the
+        // nested radial. The wasInNested check covers radial-only sessions
+        // (which don't set didShowOverlay).
+        if didShowOverlay || wasInNested {
             hideOverlay()
             didShowOverlay = false
         }
@@ -246,10 +250,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
     }
 
     private func enterNestedMode(letter: String, binding: KeyBinding, nested: NestedBindings) {
+        // Key repeat fires keyDown every ~30ms while held — without this guard
+        // we'd re-present the overlay (alpha 0 → 1 fade) on every tick and it
+        // would visibly flash.
+        if nestedActiveKey == letter && nestedActiveBinding != nil {
+            return
+        }
         nestedActiveKey = letter
         nestedActiveBinding = binding
         nestedActiveDirection = nil
-        showRadial(letter: letter, binding: binding, nested: nested, highlighted: nil)
+        presentRadial(letter: letter, binding: binding, nested: nested, highlighted: nil)
     }
 
     private func updateNestedDirection(_ direction: NestedDirection) {
@@ -257,8 +267,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
               let binding = nestedActiveBinding,
               let nested = binding.nested
         else { return }
+        // Same key repeat concern for held arrow keys.
+        if nestedActiveDirection == direction { return }
         nestedActiveDirection = direction
-        showRadial(letter: letter, binding: binding, nested: nested, highlighted: direction)
+        // Update contentView in place — calling overlay.present here would
+        // re-animate the fade-in and flash.
+        updateRadialContent(letter: letter, binding: binding, nested: nested, highlighted: direction)
     }
 
     private func exitNestedMode(execute: Bool) {
@@ -292,7 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         }
     }
 
-    private func showRadial(letter: String, binding: KeyBinding, nested: NestedBindings, highlighted: NestedDirection?) {
+    private func presentRadial(letter: String, binding: KeyBinding, nested: NestedBindings, highlighted: NestedDirection?) {
         if overlay == nil { overlay = OverlayPanel() }
         guard let overlay else { return }
         let host = NSHostingView(rootView: NestedRadialView(
@@ -303,6 +317,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         ))
         host.frame = NSRect(x: 0, y: 0, width: overlay.frame.width, height: overlay.frame.height)
         overlay.present(contentView: host)
+    }
+
+    private func updateRadialContent(letter: String, binding: KeyBinding, nested: NestedBindings, highlighted: NestedDirection?) {
+        guard let overlay else { return }
+        let host = NSHostingView(rootView: NestedRadialView(
+            rootKey: letter,
+            rootBinding: binding,
+            nested: nested,
+            highlighted: highlighted
+        ))
+        host.frame = NSRect(x: 0, y: 0, width: overlay.frame.width, height: overlay.frame.height)
+        overlay.contentView = host
     }
 
     private func watchConfigFile() {
