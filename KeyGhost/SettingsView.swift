@@ -296,12 +296,16 @@ private struct BindingEditorPanel: View {
         let trimmedBundle = bundleId.trimmingCharacters(in: .whitespaces)
         let trimmedURL = urlString.trimmingCharacters(in: .whitespaces)
         let trimmedLabel = label.trimmingCharacters(in: .whitespaces)
+        let existing = store.config.bindings.first(where: { $0.key.uppercased() == key.uppercased() })
         let new = KeyBinding(
             key: key,
             bundleId: trimmedBundle.isEmpty ? nil : trimmedBundle,
             label: trimmedLabel.isEmpty ? nil : trimmedLabel,
             passthrough: isPassthrough ? true : nil,
-            url: (mode == .url && !trimmedURL.isEmpty) ? trimmedURL : nil
+            url: (mode == .url && !trimmedURL.isEmpty) ? trimmedURL : nil,
+            // Preserve any nested config edited via JSON — Settings UI doesn't
+            // expose it yet, so we round-trip it untouched.
+            nested: existing?.nested
         )
         store.upsert(new)
     }

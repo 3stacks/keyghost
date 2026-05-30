@@ -11,4 +11,11 @@ enum KeyCode {
         0x25: "L", 0x26: "J", 0x28: "K",
         0x2D: "N", 0x2E: "M"
     ]
+
+    static let toArrow: [Int64: NestedDirection] = [
+        0x7B: .left,   // 123
+        0x7C: .right,  // 124
+        0x7D: .down,   // 125
+        0x7E: .up      // 126
+    ]
 }

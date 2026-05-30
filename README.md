@@ -69,6 +69,27 @@ Menu bar → **Settings…** (or ⌘,) opens an editor with:
 | `bindings[].url` | Optional URL to open. With `bundleId`, opens in that specific app (Chrome for Gmail). Without, uses the system default |
 | `bindings[].label` | Small caption beneath the icon |
 | `bindings[].passthrough` | Display the icon on the overlay but let the chord through to the OS, so an already-registered hotkey owner (Maccy, Raycast, Shortcuts.app) handles it. KeyGhost rewrites the event flags to the full `⌃⌥⇧⌘` chord before passing it through |
+| `bindings[].nested` | Optional `{ up, right, down, left }` map of secondary actions. While the chord is held, pressing an arrow key highlights that direction's tile in a radial overlay; releasing the trigger fires it. Releasing without an arrow press falls back to the root binding |
+
+### Nested radial example
+
+```json
+{
+  "key": "F",
+  "bundleId": "com.google.Chrome",
+  "label": "Chrome",
+  "nested": {
+    "up":    { "bundleId": "com.google.Chrome", "url": "https://mail.google.com",     "label": "Gmail" },
+    "right": { "bundleId": "com.google.Chrome", "url": "https://calendar.google.com", "label": "Calendar" },
+    "down":  { "bundleId": "com.google.Chrome", "url": "https://github.com",          "label": "GitHub" }
+  }
+}
+```
+
+Caps + F by itself opens Chrome. Caps + F + ↑ opens Gmail in Chrome,
+Caps + F + → opens Google Calendar, Caps + F + ↓ opens GitHub. Any
+direction left out of `nested` just shows an empty slot. The Settings
+UI doesn't expose `nested` editing yet — edit `bindings.json` directly.
 
 The file is live-watched, so saving refreshes the next overlay
 invocation.

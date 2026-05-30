@@ -29,15 +29,18 @@ final class ChordMonitor {
     private let chordMask: CGEventFlags
     private let isHyperHeld: () -> Bool
     private let onChord: (String) -> ChordOutcome
+    private let onArrow: (NestedDirection) -> ChordOutcome
 
     init(
         chordMask: CGEventFlags,
         isHyperHeld: @escaping () -> Bool,
-        onChord: @escaping (String) -> ChordOutcome
+        onChord: @escaping (String) -> ChordOutcome,
+        onArrow: @escaping (NestedDirection) -> ChordOutcome
     ) {
         self.chordMask = chordMask
         self.isHyperHeld = isHyperHeld
         self.onChord = onChord
+        self.onArrow = onArrow
     }
 
     @discardableResult
@@ -74,10 +77,18 @@ final class ChordMonitor {
         let hidHyper = isHyperHeld()
         let isChord = flagMatch || hidHyper
         log.debug("keyDown code=\(keyCode, privacy: .public) flags=0x\(String(flags.rawValue, radix: 16), privacy: .public) flagMatch=\(flagMatch, privacy: .public) hidHyper=\(hidHyper, privacy: .public)")
-        guard isChord, let letter = KeyCode.toLetter[keyCode] else {
+        guard isChord else {
             return Unmanaged.passUnretained(event)
         }
-        switch onChord(letter) {
+        let outcome: ChordOutcome
+        if let letter = KeyCode.toLetter[keyCode] {
+            outcome = onChord(letter)
+        } else if let direction = KeyCode.toArrow[keyCode] {
+            outcome = onArrow(direction)
+        } else {
+            return Unmanaged.passUnretained(event)
+        }
+        switch outcome {
         case .swallow:
             return nil
         case .rewriteFlags(let addMods):

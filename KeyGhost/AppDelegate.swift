@@ -20,6 +20,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
     private var holdWorkItem: DispatchWorkItem?
     private var activeTriggerKey: TriggerKey = .capsLock
 
+    // Nested radial state — non-nil while a chord with `nested` is held.
+    // Trigger release commits: the highlighted direction's action, or the
+    // root binding if no direction was chosen.
+    private var nestedActiveKey: String?
+    private var nestedActiveBinding: KeyBinding?
+    private var nestedActiveDirection: NestedDirection?
+
     private var config: BindingsConfig { store.config }
 
     private lazy var updaterController = SPUStandardUpdaterController(
@@ -82,6 +89,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
             onChord: { [weak self] letter in
                 guard let self else { return .passthrough }
                 return self.handleChord(letter: letter)
+            },
+            onArrow: { [weak self] direction in
+                guard let self else { return .passthrough }
+                return self.handleArrow(direction: direction)
             }
         )
         chord.start()
@@ -155,7 +166,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         isTriggerHeld = false
         holdWorkItem?.cancel()
         holdWorkItem = nil
-        if didShowOverlay {
+
+        let wasInNested = nestedActiveBinding != nil
+        // Nested chord open → commit the selection (or root fallback) on release.
+        if wasInNested {
+            exitNestedMode(execute: true)
+        }
+
+        // Dismiss whichever overlay variant is up — the main keyboard or the
+        // nested radial. The wasInNested check covers radial-only sessions
+        // (which don't set didShowOverlay).
+        if didShowOverlay || wasInNested {
             hideOverlay()
             didShowOverlay = false
         }
@@ -168,12 +189,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         }
         guard let binding = result.binding else { return .passthrough }
 
+        // A binding with nested options doesn't fire immediately — it opens the
+        // radial overlay and waits for arrow + trigger-release to commit.
+        if let nested = binding.nested, nested.hasAny {
+            DispatchQueue.main.async {
+                // Cancel any in-flight hold timer / dismiss the main keyboard
+                // overlay — the radial replaces both.
+                self.holdWorkItem?.cancel()
+                self.holdWorkItem = nil
+                self.didShowOverlay = false
+                self.enterNestedMode(letter: letter, binding: binding, nested: nested)
+            }
+            return .swallow
+        }
+
         if result.dismiss {
             DispatchQueue.main.async {
                 self.holdWorkItem?.cancel()
                 self.holdWorkItem = nil
                 self.hideOverlay()
                 self.didShowOverlay = false
+            }
+        }
+
+        // Different letter chord came in while a nested radial was open — drop
+        // the radial without firing the previous binding and treat this as a
+        // fresh chord.
+        DispatchQueue.main.async {
+            if self.nestedActiveBinding != nil {
+                self.exitNestedMode(execute: false)
             }
         }
 
@@ -194,6 +238,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
             Launcher.launch(bundleId: bundleId)
         }
         return .swallow
+    }
+
+    nonisolated private func handleArrow(direction: NestedDirection) -> ChordOutcome {
+        let isInNested = MainActor.assumeIsolated { self.nestedActiveBinding != nil }
+        guard isInNested else { return .passthrough }
+        DispatchQueue.main.async {
+            self.updateNestedDirection(direction)
+        }
+        return .swallow
+    }
+
+    private func enterNestedMode(letter: String, binding: KeyBinding, nested: NestedBindings) {
+        // Key repeat fires keyDown every ~30ms while held — without this guard
+        // we'd re-present the overlay (alpha 0 → 1 fade) on every tick and it
+        // would visibly flash.
+        if nestedActiveKey == letter && nestedActiveBinding != nil {
+            return
+        }
+        nestedActiveKey = letter
+        nestedActiveBinding = binding
+        nestedActiveDirection = nil
+        presentRadial(letter: letter, binding: binding, nested: nested, highlighted: nil)
+    }
+
+    private func updateNestedDirection(_ direction: NestedDirection) {
+        guard let letter = nestedActiveKey,
+              let binding = nestedActiveBinding,
+              let nested = binding.nested
+        else { return }
+        // Same key repeat concern for held arrow keys.
+        if nestedActiveDirection == direction { return }
+        nestedActiveDirection = direction
+        // Update contentView in place — calling overlay.present here would
+        // re-animate the fade-in and flash.
+        updateRadialContent(letter: letter, binding: binding, nested: nested, highlighted: direction)
+    }
+
+    private func exitNestedMode(execute: Bool) {
+        let binding = nestedActiveBinding
+        let direction = nestedActiveDirection
+        nestedActiveKey = nil
+        nestedActiveBinding = nil
+        nestedActiveDirection = nil
+        if execute, let binding {
+            commitNestedSelection(binding: binding, direction: direction)
+        }
+    }
+
+    private func commitNestedSelection(binding: KeyBinding, direction: NestedDirection?) {
+        if let dir = direction,
+           let action = binding.nested?.action(for: dir) {
+            executeAction(bundleId: action.bundleId, url: action.url)
+            return
+        }
+        // No arrow pressed → fall back to the root binding's action.
+        executeAction(bundleId: binding.bundleId, url: binding.url)
+    }
+
+    private func executeAction(bundleId: String?, url: String?) {
+        if let urlString = url {
+            Launcher.openURL(urlString, inBundleId: bundleId)
+            return
+        }
+        if let bid = bundleId {
+            Launcher.launch(bundleId: bid)
+        }
+    }
+
+    private func presentRadial(letter: String, binding: KeyBinding, nested: NestedBindings, highlighted: NestedDirection?) {
+        if overlay == nil { overlay = OverlayPanel() }
+        guard let overlay else { return }
+        let host = NSHostingView(rootView: NestedRadialView(
+            rootKey: letter,
+            rootBinding: binding,
+            nested: nested,
+            highlighted: highlighted
+        ))
+        host.frame = NSRect(x: 0, y: 0, width: overlay.frame.width, height: overlay.frame.height)
+        overlay.present(contentView: host)
+    }
+
+    private func updateRadialContent(letter: String, binding: KeyBinding, nested: NestedBindings, highlighted: NestedDirection?) {
+        guard let overlay else { return }
+        let host = NSHostingView(rootView: NestedRadialView(
+            rootKey: letter,
+            rootBinding: binding,
+            nested: nested,
+            highlighted: highlighted
+        ))
+        host.frame = NSRect(x: 0, y: 0, width: overlay.frame.width, height: overlay.frame.height)
+        overlay.contentView = host
     }
 
     private func watchConfigFile() {
