@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Uploads the signed/notarized DMG and the Sparkle appcast.xml to the keyghost
-# Cloudflare R2 bucket. Reads VERSION + CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN
-# from the environment. CLOUDFLARE_API_TOKEN is the auth wrangler picks up; the
-# account ID can be set as an env var or via the --remote flag's context.
+# Cloudflare R2 bucket via R2's S3-compatible API. Reads VERSION,
+# CLOUDFLARE_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY from the env
+# (./.env is sourced automatically).
+#
+# Create the access keys at:
+#   https://dash.cloudflare.com/<account>/r2/api-tokens
+# with "Object Read & Write" scoped to the `keyghost` bucket.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Source ./.env if present so CLOUDFLARE_API_TOKEN (and any other release vars)
-# can live there instead of the shell. The file is gitignored.
 if [ -f "$ROOT/.env" ]; then
     set -a; source "$ROOT/.env"; set +a
 fi
@@ -17,7 +19,8 @@ NAME="KeyGhost"
 VERSION="${VERSION:?VERSION env var is required, e.g. VERSION=0.2.0}"
 BUCKET="${R2_BUCKET:-keyghost}"
 ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID env var is required}"
-: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN env var is required (R2 token with object read+write on bucket '$BUCKET')}"
+: "${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID env var is required (R2 token: Object Read & Write on bucket '$BUCKET')}"
+: "${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY env var is required (paired with R2_ACCESS_KEY_ID)}"
 
 DMG="$ROOT/build/${NAME}-${VERSION}.dmg"
 APPCAST="$ROOT/build/appcast.xml"
@@ -31,25 +34,31 @@ if [ ! -f "$APPCAST" ]; then
     exit 1
 fi
 
-WRANGLER="$ROOT/node_modules/.bin/wrangler"
-if [ ! -x "$WRANGLER" ]; then
-    echo "✖ wrangler not found at $WRANGLER — run 'bun install' (or 'npm install') first" >&2
+if ! command -v aws >/dev/null 2>&1; then
+    echo "✖ aws CLI not found — install with 'brew install awscli'" >&2
     exit 1
 fi
 
+ENDPOINT="https://${ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+# R2 ignores the region but aws CLI requires one; "auto" is the convention.
+export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+export AWS_DEFAULT_REGION="auto"
+
 # Upload the versioned DMG first so the appcast — which points at it — never
 # references an object that doesn't exist yet.
-echo "→ upload ${NAME}-${VERSION}.dmg → $BUCKET/"
-CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID" "$WRANGLER" r2 object put \
-    "$BUCKET/${NAME}-${VERSION}.dmg" \
-    --file="$DMG" \
-    --remote 2>&1 | sed 's/^/    /'
+echo "→ upload ${NAME}-${VERSION}.dmg → s3://${BUCKET}/"
+aws s3 cp "$DMG" "s3://${BUCKET}/${NAME}-${VERSION}.dmg" \
+    --endpoint-url "$ENDPOINT" \
+    --content-type "application/x-apple-diskimage" \
+    --checksum-algorithm CRC32 2>&1 | sed 's/^/    /'
 
-echo "→ upload appcast.xml → $BUCKET/"
-CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID" "$WRANGLER" r2 object put \
-    "$BUCKET/appcast.xml" \
-    --file="$APPCAST" \
-    --content-type="application/xml" \
-    --remote 2>&1 | sed 's/^/    /'
+echo "→ upload appcast.xml → s3://${BUCKET}/"
+aws s3 cp "$APPCAST" "s3://${BUCKET}/appcast.xml" \
+    --endpoint-url "$ENDPOINT" \
+    --content-type "application/xml" \
+    --cache-control "no-cache, max-age=0" \
+    --checksum-algorithm CRC32 2>&1 | sed 's/^/    /'
 
 echo "✓ uploaded ${NAME}-${VERSION}.dmg + appcast.xml to R2 bucket '$BUCKET'"

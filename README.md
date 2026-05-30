@@ -161,23 +161,27 @@ Done once per machine. All secrets live in the local Keychain or in
    `Bundle/Info.plist` (replace `__SU_PUBLIC_ED_KEY__` under
    `SUPublicEDKey`) and commit that one-line change.
 
-4. **Install wrangler and create a `.env`** with the Cloudflare R2 API
-   token (and optionally your signing identity so you don't have to
-   re-type it):
+4. **Create R2 S3 access keys and a `.env`.** Visit
+   <https://dash.cloudflare.com/66bbbf59d9ee8948f770553dfc0d5721/r2/api-tokens>,
+   create a token with **Object Read & Write** scoped to the `keyghost`
+   bucket. Cloudflare returns an Access Key ID + Secret Access Key
+   pair; paste them into a gitignored `.env` alongside your signing
+   identity:
 
    ```sh
-   bun install
+   brew install awscli   # one-time, if you don't already have it
    cat > .env <<'EOF'
-   CLOUDFLARE_API_TOKEN=…   # R2 token: object read+write on `keyghost`
+   R2_ACCESS_KEY_ID=…
+   R2_SECRET_ACCESS_KEY=…
    SIGNING_IDENTITY=Developer ID Application: Your Name (TEAMID)
    TEAM_ID=TEAMID
    EOF
    ```
 
-   `.env` is gitignored. The build and upload scripts source it
-   automatically — wrangler reads `CLOUDFLARE_API_TOKEN` directly, so
-   no interactive `wrangler login` is needed. Create the token at
-   Cloudflare dashboard → R2 → Manage API Tokens.
+   The build and upload scripts source `.env` automatically. Uploads
+   use the S3-compatible API via `aws s3 cp` against
+   `https://<account>.r2.cloudflarestorage.com` — no `wrangler login`,
+   no Bearer token quirks.
 
 5. **Attach the custom domain** `keyghost.lukeboyle.com` to the R2
    bucket `keyghost` in the Cloudflare dashboard (R2 → bucket →
