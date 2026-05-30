@@ -121,10 +121,10 @@ Developer ID identity gives a stable signature and the grants stick.
 
 ## Releasing
 
-Releases are tag-driven: push `vX.Y.Z` and `.github/workflows/release.yml`
-will build, sign, notarize, generate a Sparkle appcast, publish a GitHub
-Release with the DMG attached, and push the DMG + `appcast.xml` to the
-Cloudflare R2 bucket served at <https://keyghost.lukeboyle.com/>.
+Releases run locally from a machine with the signing keychain set up
+(no GitHub Actions). The flow is the same as `~/ko-work/Sites/ko-nav`:
+build → sign → notarize → generate appcast → upload to R2 → cut a
+GitHub Release.
 
 Existing installs poll `https://keyghost.lukeboyle.com/appcast.xml` and
 self-update via Sparkle ("Check for Updates…" in the menu bar, or on the
@@ -132,56 +132,68 @@ automatic schedule).
 
 ### One-time setup
 
-Before the first release, generate the Sparkle EdDSA signing keypair and
-configure the secrets and DNS.
+Done once per machine. All secrets live in the local Keychain or in
+`wrangler`'s config — nothing in the repo, nothing in GitHub secrets.
 
-1. **Generate the EdDSA keypair** (after running `swift build` at least
-   once so the Sparkle artifacts are present):
+1. **Import the Developer ID Application certificate** into your login
+   Keychain (Xcode → Settings → Accounts → Manage Certificates, or
+   double-click the .p12 export).
+
+2. **Register a notarytool keychain profile** so the build script can
+   submit without prompting:
+
+   ```sh
+   xcrun notarytool store-credentials notarytool-profile \
+       --apple-id you@example.com \
+       --team-id TEAMID \
+       --password APP_SPECIFIC_PASSWORD
+   ```
+
+3. **Generate the Sparkle EdDSA signing keypair** (after running
+   `swift build` at least once so the Sparkle artifacts are present):
 
    ```sh
    ./.build/artifacts/sparkle/Sparkle/bin/generate_keys
    ```
 
-   Copy the public key into `Bundle/Info.plist` (replace
-   `__SU_PUBLIC_ED_KEY__` under `SUPublicEDKey`). Keep the private key
-   — it must go into the `SPARKLE_ED_PRIVATE_KEY` GitHub secret below
-   and **never** be committed.
+   The private key is stored in your Keychain — `generate_appcast` finds
+   it automatically. Copy the public key it prints into
+   `Bundle/Info.plist` (replace `__SU_PUBLIC_ED_KEY__` under
+   `SUPublicEDKey`) and commit that one-line change.
 
-2. **Set the GitHub repository secrets** (Settings → Secrets and variables
-   → Actions):
+4. **Authenticate wrangler** for R2 uploads:
 
-   | Secret | What it is |
-   | --- | --- |
-   | `MACOS_DEVELOPER_ID_CERT_BASE64` | `base64 < cert.p12` of the Developer ID Application export |
-   | `MACOS_DEVELOPER_ID_CERT_PASSWORD` | password used when exporting the .p12 |
-   | `KEYCHAIN_PASSWORD` | any string — temp keychain password for CI |
-   | `SIGNING_IDENTITY` | e.g. `Developer ID Application: Luke Boyle (TEAMID)` |
-   | `APPLE_ID` | Apple ID used for notarization |
-   | `APPLE_ID_PASSWORD` | app-specific password from appleid.apple.com |
-   | `APPLE_TEAM_ID` | 10-character Apple Developer team ID |
-   | `SPARKLE_ED_PRIVATE_KEY` | EdDSA private key from step 1 |
-   | `CLOUDFLARE_API_TOKEN` | R2 token with object read+write on the `keyghost` bucket |
-   | `CLOUDFLARE_ACCOUNT_ID` | `66bbbf59d9ee8948f770553dfc0d5721` |
+   ```sh
+   bun install
+   bunx wrangler login
+   ```
 
-3. **Wire the custom domain**. In the Cloudflare dashboard, attach
-   `keyghost.lukeboyle.com` to the R2 bucket `keyghost` (R2 → bucket →
-   Settings → Custom Domains). The hostname in `SUFeedURL` and the
-   `--download-url-prefix` flag both rely on this.
+5. **Attach the custom domain** `keyghost.lukeboyle.com` to the R2
+   bucket `keyghost` in the Cloudflare dashboard (R2 → bucket →
+   Settings → Custom Domains). `SUFeedURL` and the appcast download
+   URLs both rely on this.
 
 ### Cutting a release
 
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+VERSION=0.2.0
+SIGNING_IDENTITY="Developer ID Application: Luke Boyle (TEAMID)" \
+TEAM_ID="TEAMID" \
+VERSION="$VERSION" \
+./scripts/build-dmg.sh                  # build + sign + notarize + appcast
+
+VERSION="$VERSION" CLOUDFLARE_ACCOUNT_ID=66bbbf59d9ee8948f770553dfc0d5721 \
+./scripts/upload-r2.sh                  # publish DMG + appcast to R2
+
+gh release create "v$VERSION" \
+    "build/KeyGhost-$VERSION.dmg" \
+    "build/appcast.xml" \
+    --title "KeyGhost v$VERSION" \
+    --generate-notes
 ```
 
-The workflow runs on `macos-14`, takes ~10 minutes (most of which is
-`notarytool` waiting), and on success the new version is live for both
-fresh downloads (GitHub Release page) and existing installs (Sparkle
-auto-update from R2).
-
-For a dry run, use the workflow's manual `workflow_dispatch` trigger —
-it builds + notarizes but skips the R2 upload and GitHub Release steps.
+The notarize step is what takes the most time (~3–10 minutes waiting
+on Apple). Everything else is local.
 
 ## Layout
 
@@ -210,7 +222,6 @@ keyghost/
 │   ├── build-app.sh                # release build → KeyGhost.app (embeds Sparkle.framework)
 │   ├── build-dmg.sh                # signed + notarized DMG + Sparkle appcast.xml
 │   └── upload-r2.sh                # publishes DMG + appcast to Cloudflare R2
-├── .github/workflows/release.yml   # tag-driven build → notarize → R2 → GH Release
 ├── package.json                    # wrangler devDep (used by upload-r2.sh)
 └── Package.swift
 ```

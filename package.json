@@ -2,7 +2,7 @@
   "name": "keyghost-release-tooling",
   "version": "1.0.0",
   "private": true,
-  "description": "Wrangler is used by the release workflow to upload signed DMGs + Sparkle appcasts to the keyghost R2 bucket.",
+  "description": "Wrangler is used by scripts/upload-r2.sh to publish signed DMGs + Sparkle appcasts to the keyghost R2 bucket.",
   "devDependencies": {
     "wrangler": "^4.90.1"
   }

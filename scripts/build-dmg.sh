@@ -64,10 +64,10 @@ else
     echo "    Gatekeeper: WARN (notarization may still be propagating, or this is an ad-hoc build)"
 fi
 
-# Generate Sparkle appcast.xml so the auto-update feed picks up this build. We
-# need the private EdDSA key — passed via the SPARKLE_ED_PRIVATE_KEY env var in
-# CI, looked up in the keychain locally. If neither is available we skip (e.g.
-# unsigned developer builds don't ship via Sparkle anyway).
+# Generate Sparkle appcast.xml so existing installs see this build. The EdDSA
+# private key is read from the user's Keychain (where 'generate_keys' put it
+# during one-time setup) — same as ko-nav. Ad-hoc builds skip this because they
+# aren't shipped via Sparkle.
 APPCAST="$ROOT/build/appcast.xml"
 GENERATE_APPCAST="$ROOT/.build/artifacts/sparkle/Sparkle/bin/generate_appcast"
 DOWNLOAD_URL_PREFIX="${SPARKLE_DOWNLOAD_URL_PREFIX:-https://keyghost.lukeboyle.com/}"
@@ -83,17 +83,9 @@ else
     # current one is published in the feed.
     find "$ROOT/build" -maxdepth 1 -name "*.dmg" -not -name "$(basename "$DMG")" -delete
 
-    if [ -n "${SPARKLE_ED_PRIVATE_KEY:-}" ]; then
-        echo "$SPARKLE_ED_PRIVATE_KEY" | "$GENERATE_APPCAST" \
-            --ed-key-file - \
-            --download-url-prefix "$DOWNLOAD_URL_PREFIX" \
-            "$ROOT/build" 2>&1 | sed 's/^/    /'
-    else
-        echo "    (using EdDSA key from keychain — pass SPARKLE_ED_PRIVATE_KEY to override)"
-        "$GENERATE_APPCAST" \
-            --download-url-prefix "$DOWNLOAD_URL_PREFIX" \
-            "$ROOT/build" 2>&1 | sed 's/^/    /'
-    fi
+    "$GENERATE_APPCAST" \
+        --download-url-prefix "$DOWNLOAD_URL_PREFIX" \
+        "$ROOT/build" 2>&1 | sed 's/^/    /'
 
     if [ -f "$APPCAST" ]; then
         echo "    appcast.xml: $(wc -l < "$APPCAST") lines"
