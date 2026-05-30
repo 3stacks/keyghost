@@ -2,9 +2,10 @@ import AppKit
 import SwiftUI
 import ApplicationServices
 import IOKit.hid
+import Sparkle
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUStandardUserDriverDelegate {
     private var statusItem: NSStatusItem!
     private var overlay: OverlayPanel?
     private var chordMonitor: ChordMonitor?
@@ -20,6 +21,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeTriggerKey: TriggerKey = .capsLock
 
     private var config: BindingsConfig { store.config }
+
+    private lazy var updaterController = SPUStandardUpdaterController(
+        startingUpdater: true,
+        updaterDelegate: nil,
+        userDriverDelegate: self
+    )
+
+    // Show update alerts as regular windows; LSUIElement apps have no Dock icon
+    // to host the gentle reminder banner.
+    var supportsGentleScheduledUpdateReminders: Bool { false }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
@@ -50,6 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Grant Accessibility…", action: #selector(promptForAccessibility), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Grant Input Monitoring…", action: #selector(promptForInputMonitoring), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit KeyGhost", action: #selector(quit), keyEquivalent: "q"))
         statusItem.menu = menu
@@ -249,6 +262,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func promptForAccessibility() {
         let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(opts)
+    }
+
+    @objc private func checkForUpdates() {
+        NSApp.activate(ignoringOtherApps: true)
+        updaterController.checkForUpdates(nil)
     }
 
     @objc private func quit() {

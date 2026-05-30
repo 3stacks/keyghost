@@ -2,7 +2,7 @@ import Foundation
 import IOKit.hid
 import os
 
-private let log = Logger(subsystem: "com.kogroup.keyghost", category: "trigger")
+private let log = Logger(subsystem: "com.lukeboyle.keyghost", category: "trigger")
 
 /// User-selectable trigger keys. Anything on the keyboard HID page (0x07) that
 /// reliably fires press/release events works — that's basically anything except
