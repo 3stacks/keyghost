@@ -10,6 +10,7 @@ NAME="KeyGhost"
 VERSION="${VERSION:?VERSION env var is required, e.g. VERSION=0.2.0}"
 BUCKET="${R2_BUCKET:-keyghost}"
 ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID env var is required}"
+: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN env var is required (R2 token with object read+write on bucket '$BUCKET')}"
 
 DMG="$ROOT/build/${NAME}-${VERSION}.dmg"
 APPCAST="$ROOT/build/appcast.xml"

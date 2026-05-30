@@ -161,12 +161,18 @@ Done once per machine. All secrets live in the local Keychain or in
    `Bundle/Info.plist` (replace `__SU_PUBLIC_ED_KEY__` under
    `SUPublicEDKey`) and commit that one-line change.
 
-4. **Authenticate wrangler** for R2 uploads:
+4. **Install wrangler** and put a Cloudflare R2 API token somewhere your
+   shell will pick it up (e.g. 1Password CLI, `~/.zshrc.local`, or a
+   gitignored `.envrc`):
 
    ```sh
    bun install
-   bunx wrangler login
+   export CLOUDFLARE_API_TOKEN=…   # R2 token: object read+write on `keyghost`
    ```
+
+   Create the token at Cloudflare dashboard → R2 → Manage API Tokens.
+   Wrangler reads `CLOUDFLARE_API_TOKEN` from the environment, so no
+   interactive `wrangler login` is needed.
 
 5. **Attach the custom domain** `keyghost.lukeboyle.com` to the R2
    bucket `keyghost` in the Cloudflare dashboard (R2 → bucket →
@@ -182,7 +188,9 @@ TEAM_ID="TEAMID" \
 VERSION="$VERSION" \
 ./scripts/build-dmg.sh                  # build + sign + notarize + appcast
 
-VERSION="$VERSION" CLOUDFLARE_ACCOUNT_ID=66bbbf59d9ee8948f770553dfc0d5721 \
+# Assumes CLOUDFLARE_API_TOKEN is already exported in your shell.
+VERSION="$VERSION" \
+CLOUDFLARE_ACCOUNT_ID=66bbbf59d9ee8948f770553dfc0d5721 \
 ./scripts/upload-r2.sh                  # publish DMG + appcast to R2
 
 gh release create "v$VERSION" \
