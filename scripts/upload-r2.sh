@@ -6,10 +6,18 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Source ./.env if present so CLOUDFLARE_API_TOKEN (and any other release vars)
+# can live there instead of the shell. The file is gitignored.
+if [ -f "$ROOT/.env" ]; then
+    set -a; source "$ROOT/.env"; set +a
+fi
+
 NAME="KeyGhost"
 VERSION="${VERSION:?VERSION env var is required, e.g. VERSION=0.2.0}"
 BUCKET="${R2_BUCKET:-keyghost}"
 ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID env var is required}"
+: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN env var is required (R2 token with object read+write on bucket '$BUCKET')}"
 
 DMG="$ROOT/build/${NAME}-${VERSION}.dmg"
 APPCAST="$ROOT/build/appcast.xml"

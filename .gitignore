@@ -7,3 +7,6 @@ build/
 *.swp
 Package.resolved
 node_modules/
+.env
+.env.*
+!.env.example

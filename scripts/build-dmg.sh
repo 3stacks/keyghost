@@ -2,6 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Source ./.env if present so SIGNING_IDENTITY, TEAM_ID, etc. can live there
+# instead of the shell. The file is gitignored.
+if [ -f "$ROOT/.env" ]; then
+    set -a; source "$ROOT/.env"; set +a
+fi
+
 NAME="KeyGhost"
 VERSION="${VERSION:-0.1.0}"
 TEAM_ID="${TEAM_ID:-}"
