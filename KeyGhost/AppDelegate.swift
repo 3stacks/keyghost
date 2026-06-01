@@ -23,9 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
     // Nested radial state — non-nil while a chord with `nested` is held.
     // Trigger release commits: the highlighted direction's action, or the
     // root binding if no direction was chosen.
-    private var nestedActiveKey: String?
-    private var nestedActiveBinding: KeyBinding?
-    private var nestedActiveDirection: NestedDirection?
+    //
+    // The state object outlives individual SwiftUI renders so that arrow
+    // updates mutate it in place — letting SwiftUI animate highlight changes
+    // smoothly instead of swapping the NSHostingView each tick.
+    private var nestedState: NestedRadialState?
 
     private var config: BindingsConfig { store.config }
 
@@ -167,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         holdWorkItem?.cancel()
         holdWorkItem = nil
 
-        let wasInNested = nestedActiveBinding != nil
+        let wasInNested = nestedState != nil
         // Nested chord open → commit the selection (or root fallback) on release.
         if wasInNested {
             exitNestedMode(execute: true)
@@ -216,7 +218,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         // the radial without firing the previous binding and treat this as a
         // fresh chord.
         DispatchQueue.main.async {
-            if self.nestedActiveBinding != nil {
+            if self.nestedState != nil {
                 self.exitNestedMode(execute: false)
             }
         }
@@ -241,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
     }
 
     nonisolated private func handleArrow(direction: NestedDirection) -> ChordOutcome {
-        let isInNested = MainActor.assumeIsolated { self.nestedActiveBinding != nil }
+        let isInNested = MainActor.assumeIsolated { self.nestedState != nil }
         guard isInNested else { return .passthrough }
         DispatchQueue.main.async {
             self.updateNestedDirection(direction)
@@ -253,36 +255,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         // Key repeat fires keyDown every ~30ms while held — without this guard
         // we'd re-present the overlay (alpha 0 → 1 fade) on every tick and it
         // would visibly flash.
-        if nestedActiveKey == letter && nestedActiveBinding != nil {
+        if let existing = nestedState, existing.rootKey == letter {
             return
         }
-        nestedActiveKey = letter
-        nestedActiveBinding = binding
-        nestedActiveDirection = nil
-        presentRadial(letter: letter, binding: binding, nested: nested, highlighted: nil)
+        let state = NestedRadialState(rootKey: letter, rootBinding: binding, nested: nested, highlighted: nil)
+        nestedState = state
+        presentRadial(state: state)
     }
 
     private func updateNestedDirection(_ direction: NestedDirection) {
-        guard let letter = nestedActiveKey,
-              let binding = nestedActiveBinding,
-              let nested = binding.nested
-        else { return }
-        // Same key repeat concern for held arrow keys.
-        if nestedActiveDirection == direction { return }
-        nestedActiveDirection = direction
-        // Update contentView in place — calling overlay.present here would
-        // re-animate the fade-in and flash.
-        updateRadialContent(letter: letter, binding: binding, nested: nested, highlighted: direction)
+        guard let state = nestedState else { return }
+        // Pressing the same direction again toggles back to the centre — gives
+        // the user an undo path. ChordMonitor strips key autorepeats so this
+        // only fires on fresh presses.
+        let newValue: NestedDirection? = (state.highlighted == direction) ? nil : direction
+        // Mutate the observable model — SwiftUI animates the highlight change
+        // in place without re-presenting the panel.
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
+            state.highlighted = newValue
+        }
     }
 
     private func exitNestedMode(execute: Bool) {
-        let binding = nestedActiveBinding
-        let direction = nestedActiveDirection
-        nestedActiveKey = nil
-        nestedActiveBinding = nil
-        nestedActiveDirection = nil
-        if execute, let binding {
-            commitNestedSelection(binding: binding, direction: direction)
+        let state = nestedState
+        nestedState = nil
+        if execute, let state {
+            commitNestedSelection(binding: state.rootBinding, direction: state.highlighted)
         }
     }
 
@@ -306,29 +304,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         }
     }
 
-    private func presentRadial(letter: String, binding: KeyBinding, nested: NestedBindings, highlighted: NestedDirection?) {
+    private func presentRadial(state: NestedRadialState) {
         if overlay == nil { overlay = OverlayPanel() }
         guard let overlay else { return }
-        let host = NSHostingView(rootView: NestedRadialView(
-            rootKey: letter,
-            rootBinding: binding,
-            nested: nested,
-            highlighted: highlighted
-        ))
+        let host = NSHostingView(rootView: NestedRadialView(state: state))
         host.frame = NSRect(x: 0, y: 0, width: overlay.frame.width, height: overlay.frame.height)
         overlay.present(contentView: host)
-    }
-
-    private func updateRadialContent(letter: String, binding: KeyBinding, nested: NestedBindings, highlighted: NestedDirection?) {
-        guard let overlay else { return }
-        let host = NSHostingView(rootView: NestedRadialView(
-            rootKey: letter,
-            rootBinding: binding,
-            nested: nested,
-            highlighted: highlighted
-        ))
-        host.frame = NSRect(x: 0, y: 0, width: overlay.frame.width, height: overlay.frame.height)
-        overlay.contentView = host
     }
 
     private func watchConfigFile() {

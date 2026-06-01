@@ -80,6 +80,18 @@ final class ChordMonitor {
         guard isChord else {
             return Unmanaged.passUnretained(event)
         }
+
+        // Filter CGEvent autorepeats — we only act on the initial press of a
+        // chord. Holding F shouldn't launch Chrome repeatedly; holding ↑
+        // shouldn't toggle the radial direction every ~30ms.
+        let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        if isAutorepeat {
+            if KeyCode.toLetter[keyCode] != nil || KeyCode.toArrow[keyCode] != nil {
+                return nil
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
         let outcome: ChordOutcome
         if let letter = KeyCode.toLetter[keyCode] {
             outcome = onChord(letter)
