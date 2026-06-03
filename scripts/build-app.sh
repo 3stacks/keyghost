@@ -2,6 +2,15 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Source ./.env if present so SIGNING_IDENTITY, TEAM_ID, etc. can live there
+# instead of the shell. The file is gitignored. A stable Developer ID
+# signature is what makes TCC remember Accessibility + Input Monitoring
+# grants across rebuilds — ad-hoc signing gives a fresh cdhash every time.
+if [ -f "$ROOT/.env" ]; then
+    set -a; source "$ROOT/.env"; set +a
+fi
+
 NAME="KeyGhost"
 VERSION="${VERSION:-0.1.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
