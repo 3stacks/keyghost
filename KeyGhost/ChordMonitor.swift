@@ -29,13 +29,17 @@ final class ChordMonitor {
     private let chordMask: CGEventFlags
     private let isHyperHeld: () -> Bool
     private let onChord: (String) -> ChordOutcome
-    private let onArrow: (NestedDirection) -> ChordOutcome
+    /// Fires for every cardinal arrow keyDown/keyUp while a chord is held.
+    /// `isDown == false` lets AppDelegate retract a held cardinal from the
+    /// combined direction so diagonals dissolve back as the user releases
+    /// one of the two arrows.
+    private let onArrow: (NestedDirection, Bool) -> ChordOutcome
 
     init(
         chordMask: CGEventFlags,
         isHyperHeld: @escaping () -> Bool,
         onChord: @escaping (String) -> ChordOutcome,
-        onArrow: @escaping (NestedDirection) -> ChordOutcome
+        onArrow: @escaping (NestedDirection, Bool) -> ChordOutcome
     ) {
         self.chordMask = chordMask
         self.isHyperHeld = isHyperHeld
@@ -45,7 +49,7 @@ final class ChordMonitor {
 
     @discardableResult
     func start() -> Bool {
-        let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
+        let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -96,7 +100,7 @@ final class ChordMonitor {
         if let letter = KeyCode.toLetter[keyCode] {
             outcome = onChord(letter)
         } else if let direction = KeyCode.toArrow[keyCode] {
-            outcome = onArrow(direction)
+            outcome = onArrow(direction, true)
         } else {
             return Unmanaged.passUnretained(event)
         }
@@ -112,6 +116,23 @@ final class ChordMonitor {
         }
     }
 
+    fileprivate func handleKeyUp(event: CGEvent, keyCode: Int64) -> Unmanaged<CGEvent>? {
+        // Only arrow keyUps interest us — for retracting a held cardinal so
+        // diagonals collapse back to the remaining arrow. Letter keyUps and
+        // anything else pass through untouched; AppDelegate decides on
+        // outcome based on whether nested mode is active.
+        guard let direction = KeyCode.toArrow[keyCode] else {
+            return Unmanaged.passUnretained(event)
+        }
+        let outcome = onArrow(direction, false)
+        switch outcome {
+        case .swallow:
+            return nil
+        case .rewriteFlags, .passthrough:
+            return Unmanaged.passUnretained(event)
+        }
+    }
+
     private static let tapCallback: CGEventTapCallBack = { _, type, event, refcon in
         guard let refcon else { return Unmanaged.passUnretained(event) }
         let m = Unmanaged<ChordMonitor>.fromOpaque(refcon).takeUnretainedValue()
@@ -121,9 +142,12 @@ final class ChordMonitor {
             return Unmanaged.passUnretained(event)
         }
 
+        let kc = event.getIntegerValueField(.keyboardEventKeycode)
         if type == .keyDown {
-            let kc = event.getIntegerValueField(.keyboardEventKeycode)
             return m.handleKeyDown(event: event, keyCode: kc, flags: event.flags)
+        }
+        if type == .keyUp {
+            return m.handleKeyUp(event: event, keyCode: kc)
         }
         return Unmanaged.passUnretained(event)
     }

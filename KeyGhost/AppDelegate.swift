@@ -29,6 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
     // smoothly instead of swapping the NSHostingView each tick.
     private var nestedState: NestedRadialState?
 
+    // Currently-held cardinal arrows. Set of {up,right,down,left} only; the
+    // resolved direction (incl. diagonals like upRight) is computed from this
+    // set on every change. KeyUp removes; keyDown inserts.
+    private var heldArrows: Set<NestedDirection> = []
+
     private var config: BindingsConfig { store.config }
 
     private lazy var updaterController = SPUStandardUpdaterController(
@@ -92,9 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
                 guard let self else { return .passthrough }
                 return self.handleChord(letter: letter)
             },
-            onArrow: { [weak self] direction in
+            onArrow: { [weak self] direction, isDown in
                 guard let self else { return .passthrough }
-                return self.handleArrow(direction: direction)
+                return self.handleArrow(direction: direction, isDown: isDown)
             }
         )
         chord.start()
@@ -242,11 +247,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         return .swallow
     }
 
-    nonisolated private func handleArrow(direction: NestedDirection) -> ChordOutcome {
+    nonisolated private func handleArrow(direction: NestedDirection, isDown: Bool) -> ChordOutcome {
         let isInNested = MainActor.assumeIsolated { self.nestedState != nil }
         guard isInNested else { return .passthrough }
         DispatchQueue.main.async {
-            self.updateNestedDirection(direction)
+            if isDown {
+                self.processArrowDown(direction)
+            } else {
+                // keyUp only retracts from the held set; highlight sticks so
+                // that releasing the arrow before the trigger still commits
+                // the user's choice. Diagonals are settled by simultaneous
+                // keyDowns; release order doesn't undo them.
+                self.heldArrows.remove(direction)
+            }
         }
         return .swallow
     }
@@ -263,22 +276,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         presentRadial(state: state)
     }
 
-    private func updateNestedDirection(_ direction: NestedDirection) {
+    private func processArrowDown(_ direction: NestedDirection) {
         guard let state = nestedState else { return }
-        // Pressing the same direction again toggles back to the centre — gives
-        // the user an undo path. ChordMonitor strips key autorepeats so this
-        // only fires on fresh presses.
-        let newValue: NestedDirection? = (state.highlighted == direction) ? nil : direction
+        let prevHighlighted = state.highlighted
+        heldArrows.insert(direction)
+        let resolved = Self.resolveDirection(from: heldArrows)
+
+        // Tap-toggle: pressing the same lone cardinal that's already highlighted
+        // clears the selection — gives the user an undo path. Autorepeats are
+        // already filtered by ChordMonitor, so this only fires on fresh presses.
+        let isToggle = heldArrows == [direction] && prevHighlighted == direction
+        var next: NestedDirection? = isToggle ? nil : resolved
+
+        // If the resolved direction has no action defined, drop back to nil
+        // so the centre tile keeps pulsing (signalling "release fires root")
+        // instead of leaving a confusing dead state with no glow anywhere.
+        if let n = next, state.nested.action(for: n) == nil {
+            next = nil
+        }
         // Mutate the observable model — SwiftUI animates the highlight change
         // in place without re-presenting the panel.
         withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
-            state.highlighted = newValue
+            state.highlighted = next
+        }
+    }
+
+    /// Combine the set of held cardinal arrows into a single direction. Two
+    /// adjacent cardinals (e.g. up + right) resolve to the diagonal between
+    /// them; opposing pairs (up + down or left + right) cancel out, falling
+    /// back to whichever orthogonal axis is still defined.
+    static func resolveDirection(from held: Set<NestedDirection>) -> NestedDirection? {
+        let up = held.contains(.up)
+        let down = held.contains(.down)
+        let left = held.contains(.left)
+        let right = held.contains(.right)
+
+        // Opposing arrows on the same axis cancel each other — neither wins.
+        let vertical: NestedDirection? = (up == down) ? nil : (up ? .up : .down)
+        let horizontal: NestedDirection? = (left == right) ? nil : (right ? .right : .left)
+
+        switch (vertical, horizontal) {
+        case (.up, .right): return .upRight
+        case (.up, .left): return .upLeft
+        case (.down, .right): return .downRight
+        case (.down, .left): return .downLeft
+        case (.some(let v), nil): return v
+        case (nil, .some(let h)): return h
+        case (nil, nil): return nil
+        // Exhaustiveness for the compiler — vertical only ever produces
+        // .up/.down/nil and horizontal only .left/.right/nil.
+        default: return nil
         }
     }
 
     private func exitNestedMode(execute: Bool) {
         let state = nestedState
         nestedState = nil
+        heldArrows.removeAll()
         if execute, let state {
             commitNestedSelection(binding: state.rootBinding, direction: state.highlighted)
         }

@@ -28,11 +28,11 @@ struct NestedRadialView: View {
     @Bindable var state: NestedRadialState
     @State private var didAppear = false
 
-    private static let tileOffset: CGFloat = 110
+    private static let tileOffset: CGFloat = 130
 
     var body: some View {
         radialCluster
-            .frame(width: 360, height: 360)
+            .frame(width: 380, height: 380)
             .padding(40)
             .background(panelBackground)
             .scaleEffect(didAppear ? 1 : 0.92)
@@ -56,18 +56,37 @@ struct NestedRadialView: View {
         }
     }
 
+    /// All 8 compass directions in clockwise order starting at north. Stagger
+    /// slots use this ordering so the entrance animation reads as a clockwise
+    /// sweep around the centre.
+    private static let layoutOrder: [NestedDirection] = [
+        .up, .upRight, .right, .downRight, .down, .downLeft, .left, .upLeft
+    ]
+
     private var clusterContent: some View {
         ZStack {
-            tile(direction: .up, action: state.nested.up, slot: 0)
-                .offset(y: -Self.tileOffset)
-            tile(direction: .right, action: state.nested.right, slot: 1)
-                .offset(x: Self.tileOffset)
-            tile(direction: .down, action: state.nested.down, slot: 2)
-                .offset(y: Self.tileOffset)
-            tile(direction: .left, action: state.nested.left, slot: 3)
-                .offset(x: -Self.tileOffset)
-
+            ForEach(Array(Self.layoutOrder.enumerated()), id: \.element) { slot, direction in
+                tile(direction: direction, action: state.nested.action(for: direction), slot: slot)
+                    .offset(offset(for: direction))
+            }
             centerTile
+        }
+    }
+
+    private func offset(for direction: NestedDirection) -> CGSize {
+        let r = Self.tileOffset
+        // sin(45°) ≈ 0.7071 — equal radial distance for cardinals and diagonals,
+        // so the cluster reads as an even compass rose.
+        let d = r * 0.7071
+        switch direction {
+        case .up: return CGSize(width: 0, height: -r)
+        case .upRight: return CGSize(width: d, height: -d)
+        case .right: return CGSize(width: r, height: 0)
+        case .downRight: return CGSize(width: d, height: d)
+        case .down: return CGSize(width: 0, height: r)
+        case .downLeft: return CGSize(width: -d, height: d)
+        case .left: return CGSize(width: -r, height: 0)
+        case .upLeft: return CGSize(width: -d, height: -d)
         }
     }
 
@@ -250,18 +269,26 @@ private extension NestedDirection {
     var shortName: String {
         switch self {
         case .up: return "Up"
+        case .upRight: return "Up-Right"
         case .right: return "Right"
+        case .downRight: return "Down-Right"
         case .down: return "Down"
+        case .downLeft: return "Down-Left"
         case .left: return "Left"
+        case .upLeft: return "Up-Left"
         }
     }
 
     var glyph: String {
         switch self {
         case .up: return "↑"
+        case .upRight: return "↗"
         case .right: return "→"
+        case .downRight: return "↘"
         case .down: return "↓"
+        case .downLeft: return "↙"
         case .left: return "←"
+        case .upLeft: return "↖"
         }
     }
 }

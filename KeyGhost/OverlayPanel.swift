@@ -3,7 +3,7 @@ import AppKit
 final class OverlayPanel: NSPanel {
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 820, height: 360),
+            contentRect: NSRect(x: 0, y: 0, width: 820, height: 480),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false

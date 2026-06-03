@@ -24,9 +24,19 @@ struct KeyBinding: Codable, Hashable {
     var hasNested: Bool { nested?.hasAny == true }
 }
 
-/// One side of the cardinal compass while a chord is held.
+/// One slot of the compass while a chord is held. Cardinals come from a
+/// single arrow keyDown; diagonals come from two adjacent cardinals held
+/// simultaneously (e.g. ↑ + → → upRight).
 enum NestedDirection: String, Codable, Hashable, CaseIterable {
-    case up, right, down, left
+    case up, upRight, right, downRight, down, downLeft, left, upLeft
+
+    /// Cardinals correspond 1:1 to a physical arrow key.
+    var isCardinal: Bool {
+        switch self {
+        case .up, .right, .down, .left: return true
+        case .upRight, .downRight, .downLeft, .upLeft: return false
+        }
+    }
 }
 
 /// Secondary action invoked by releasing the trigger after pressing an arrow.
@@ -40,20 +50,51 @@ struct NestedAction: Codable, Hashable {
 
 struct NestedBindings: Codable, Hashable {
     let up: NestedAction?
+    let upRight: NestedAction?
     let right: NestedAction?
+    let downRight: NestedAction?
     let down: NestedAction?
+    let downLeft: NestedAction?
     let left: NestedAction?
+    let upLeft: NestedAction?
+
+    init(
+        up: NestedAction? = nil,
+        upRight: NestedAction? = nil,
+        right: NestedAction? = nil,
+        downRight: NestedAction? = nil,
+        down: NestedAction? = nil,
+        downLeft: NestedAction? = nil,
+        left: NestedAction? = nil,
+        upLeft: NestedAction? = nil
+    ) {
+        self.up = up
+        self.upRight = upRight
+        self.right = right
+        self.downRight = downRight
+        self.down = down
+        self.downLeft = downLeft
+        self.left = left
+        self.upLeft = upLeft
+    }
 
     func action(for direction: NestedDirection) -> NestedAction? {
         switch direction {
         case .up: return up
+        case .upRight: return upRight
         case .right: return right
+        case .downRight: return downRight
         case .down: return down
+        case .downLeft: return downLeft
         case .left: return left
+        case .upLeft: return upLeft
         }
     }
 
-    var hasAny: Bool { up != nil || right != nil || down != nil || left != nil }
+    var hasAny: Bool {
+        up != nil || upRight != nil || right != nil || downRight != nil
+            || down != nil || downLeft != nil || left != nil || upLeft != nil
+    }
 }
 
 struct BindingsConfig: Codable {

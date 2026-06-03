@@ -199,6 +199,40 @@ private struct BindingEditorPanel: View {
         case url = "URL"
     }
 
+    enum Slot: Hashable, CaseIterable {
+        case root
+        case up, upRight, right, downRight, down, downLeft, left, upLeft
+
+        var displayLabel: String {
+            switch self {
+            case .root: return "Root"
+            case .up: return "↑"
+            case .upRight: return "↗"
+            case .right: return "→"
+            case .downRight: return "↘"
+            case .down: return "↓"
+            case .downLeft: return "↙"
+            case .left: return "←"
+            case .upLeft: return "↖"
+            }
+        }
+
+        var direction: NestedDirection? {
+            switch self {
+            case .root: return nil
+            case .up: return .up
+            case .upRight: return .upRight
+            case .right: return .right
+            case .downRight: return .downRight
+            case .down: return .down
+            case .downLeft: return .downLeft
+            case .left: return .left
+            case .upLeft: return .upLeft
+            }
+        }
+    }
+
+    @State private var slot: Slot = .root
     @State private var mode: Mode = .application
     @State private var bundleId: String = ""
     @State private var urlString: String = ""
@@ -219,6 +253,16 @@ private struct BindingEditorPanel: View {
                 .frame(width: 220)
             }
 
+            row("Editing") {
+                Picker("Slot", selection: $slot) {
+                    ForEach(Slot.allCases, id: \.self) { s in
+                        Text(slotLabel(s)).tag(s)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+            }
+
             row("Application") {
                 TextField("com.apple.Terminal", text: $bundleId)
                     .textFieldStyle(.roundedBorder)
@@ -237,14 +281,21 @@ private struct BindingEditorPanel: View {
                     .textFieldStyle(.roundedBorder)
             }
 
-            Toggle("Passthrough — show icon but don't swallow the chord", isOn: $isPassthrough)
-                .padding(.leading, 96)
+            if slot == .root {
+                Toggle("Passthrough — show icon but don't swallow the chord", isOn: $isPassthrough)
+                    .padding(.leading, 96)
+            } else {
+                Text(slotHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 96)
+            }
 
             HStack {
                 Button("Save", action: save)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!canSave)
-                Button("Remove", role: .destructive, action: remove)
+                Button(removeButtonTitle, role: .destructive, action: remove)
                     .disabled(!existsInStore)
                 Spacer()
             }
@@ -252,7 +303,11 @@ private struct BindingEditorPanel: View {
         }
         .padding(.horizontal, 4)
         .onAppear(perform: load)
-        .onChange(of: key) { _, _ in load() }
+        .onChange(of: key) { _, _ in
+            slot = .root
+            load()
+        }
+        .onChange(of: slot) { _, _ in load() }
     }
 
     @ViewBuilder
@@ -265,8 +320,38 @@ private struct BindingEditorPanel: View {
         }
     }
 
+    private func slotLabel(_ s: Slot) -> String {
+        let base = s.displayLabel
+        guard let existing = store.config.bindings.first(where: { $0.key.uppercased() == key.uppercased() }) else {
+            return base
+        }
+        if let direction = s.direction {
+            return existing.nested?.action(for: direction) != nil ? "\(base) •" : base
+        }
+        let rootSet = existing.bundleId != nil || existing.url != nil
+        return rootSet ? "\(base) •" : base
+    }
+
     private var existsInStore: Bool {
-        store.config.bindings.contains { $0.key.uppercased() == key.uppercased() }
+        let existing = store.config.bindings.first(where: { $0.key.uppercased() == key.uppercased() })
+        if let direction = slot.direction {
+            return existing?.nested?.action(for: direction) != nil
+        }
+        return existing != nil
+    }
+
+    private var removeButtonTitle: String {
+        slot == .root ? "Remove" : "Clear direction"
+    }
+
+    private var slotHint: String {
+        switch slot {
+        case .root: return ""
+        case .up, .right, .down, .left:
+            return "Held-chord direction. Press this arrow while holding the chord, then release the trigger to fire."
+        case .upRight, .downRight, .downLeft, .upLeft:
+            return "Diagonal. Hold the chord, press both adjacent arrows (e.g. ↑ + →), then release the trigger to fire."
+        }
     }
 
     private var canSave: Bool {
@@ -277,7 +362,15 @@ private struct BindingEditorPanel: View {
     }
 
     private func load() {
-        if let existing = store.config.bindings.first(where: { $0.key.uppercased() == key.uppercased() }) {
+        let existing = store.config.bindings.first(where: { $0.key.uppercased() == key.uppercased() })
+        if let direction = slot.direction {
+            let action = existing?.nested?.action(for: direction)
+            bundleId = action?.bundleId ?? ""
+            urlString = action?.url ?? ""
+            label = action?.label ?? ""
+            isPassthrough = false
+            mode = (action?.url != nil) ? .url : .application
+        } else if let existing {
             bundleId = existing.bundleId ?? ""
             urlString = existing.url ?? ""
             label = existing.label ?? ""
@@ -297,22 +390,77 @@ private struct BindingEditorPanel: View {
         let trimmedURL = urlString.trimmingCharacters(in: .whitespaces)
         let trimmedLabel = label.trimmingCharacters(in: .whitespaces)
         let existing = store.config.bindings.first(where: { $0.key.uppercased() == key.uppercased() })
-        let new = KeyBinding(
-            key: key,
-            bundleId: trimmedBundle.isEmpty ? nil : trimmedBundle,
-            label: trimmedLabel.isEmpty ? nil : trimmedLabel,
-            passthrough: isPassthrough ? true : nil,
-            url: (mode == .url && !trimmedURL.isEmpty) ? trimmedURL : nil,
-            // Preserve any nested config edited via JSON — Settings UI doesn't
-            // expose it yet, so we round-trip it untouched.
-            nested: existing?.nested
-        )
-        store.upsert(new)
+
+        if let direction = slot.direction {
+            let action = NestedAction(
+                bundleId: trimmedBundle.isEmpty ? nil : trimmedBundle,
+                url: (mode == .url && !trimmedURL.isEmpty) ? trimmedURL : nil,
+                label: trimmedLabel.isEmpty ? nil : trimmedLabel
+            )
+            let newNested = nested(updating: existing?.nested, direction: direction, action: action)
+            let base = existing ?? KeyBinding(
+                key: key, bundleId: nil, label: nil, passthrough: nil, url: nil, nested: nil
+            )
+            let new = KeyBinding(
+                key: base.key,
+                bundleId: base.bundleId,
+                label: base.label,
+                passthrough: base.passthrough,
+                url: base.url,
+                nested: newNested
+            )
+            store.upsert(new)
+        } else {
+            let new = KeyBinding(
+                key: key,
+                bundleId: trimmedBundle.isEmpty ? nil : trimmedBundle,
+                label: trimmedLabel.isEmpty ? nil : trimmedLabel,
+                passthrough: isPassthrough ? true : nil,
+                url: (mode == .url && !trimmedURL.isEmpty) ? trimmedURL : nil,
+                nested: existing?.nested
+            )
+            store.upsert(new)
+        }
     }
 
     private func remove() {
-        store.remove(key: key)
+        let existing = store.config.bindings.first(where: { $0.key.uppercased() == key.uppercased() })
+        if let direction = slot.direction, let existing {
+            let newNested = nested(updating: existing.nested, direction: direction, action: nil)
+            let updated = KeyBinding(
+                key: existing.key,
+                bundleId: existing.bundleId,
+                label: existing.label,
+                passthrough: existing.passthrough,
+                url: existing.url,
+                nested: newNested
+            )
+            if updated.bundleId == nil && updated.url == nil && updated.nested == nil {
+                store.remove(key: key)
+            } else {
+                store.upsert(updated)
+            }
+        } else {
+            store.remove(key: key)
+        }
         load()
+    }
+
+    private func nested(updating current: NestedBindings?, direction: NestedDirection, action: NestedAction?) -> NestedBindings? {
+        func slot(_ d: NestedDirection) -> NestedAction? {
+            direction == d ? action : current?.action(for: d)
+        }
+        let result = NestedBindings(
+            up: slot(.up),
+            upRight: slot(.upRight),
+            right: slot(.right),
+            downRight: slot(.downRight),
+            down: slot(.down),
+            downLeft: slot(.downLeft),
+            left: slot(.left),
+            upLeft: slot(.upLeft)
+        )
+        return result.hasAny ? result : nil
     }
 
     private func chooseApp() {
