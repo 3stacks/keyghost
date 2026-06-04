@@ -2,8 +2,12 @@ import AppKit
 
 final class OverlayPanel: NSPanel {
     init() {
+        // 960×680 is sized to comfortably hold both layouts the panel hosts:
+        // the keyboard overlay (~820 wide) plus its shadow, and the larger
+        // nested radial (~620 across including the outermost tile bounds and
+        // its glow). Centered on screen by the panel placement code below.
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 820, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 960, height: 680),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
