@@ -34,6 +34,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
     // set on every change. KeyUp removes; keyDown inserts.
     private var heldArrows: Set<NestedDirection> = []
 
+    // Drives the chord-fired pulse animation on the overlay's pressed tile.
+    // Shared with KeyboardOverlayView so mutating `firedKey` triggers the
+    // tile flash without re-presenting the panel. See OverlayPulseState for
+    // the muscle-memory rationale behind keeping the pulse at all.
+    private let overlayPulseState = OverlayPulseState()
+
     private var config: BindingsConfig { store.config }
 
     private lazy var updaterController = SPUStandardUpdaterController(
@@ -211,11 +217,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         }
 
         if result.dismiss {
+            // Flash the pressed tile green, then dismiss. The brief delay
+            // (~220ms) is what makes the overlay feel responsive instead of
+            // disappearing into the void — learners get a confirmed "yes,
+            // KeyGhost saw that and acted" before the panel vanishes.
             DispatchQueue.main.async {
                 self.holdWorkItem?.cancel()
                 self.holdWorkItem = nil
+                self.overlayPulseState.firedKey = letter
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(220)) {
                 self.hideOverlay()
                 self.didShowOverlay = false
+                self.overlayPulseState.firedKey = nil
             }
         }
 
@@ -254,11 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
             if isDown {
                 self.processArrowDown(direction)
             } else {
-                // keyUp only retracts from the held set; highlight sticks so
-                // that releasing the arrow before the trigger still commits
-                // the user's choice. Diagonals are settled by simultaneous
-                // keyDowns; release order doesn't undo them.
-                self.heldArrows.remove(direction)
+                self.processArrowUp(direction)
             }
         }
         return .swallow
@@ -274,6 +284,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         let state = NestedRadialState(rootKey: letter, rootBinding: binding, nested: nested, highlighted: nil)
         nestedState = state
         presentRadial(state: state)
+    }
+
+    private func processArrowUp(_ direction: NestedDirection) {
+        guard let state = nestedState else { return }
+        heldArrows.remove(direction)
+
+        // If the user released their last arrow, keep the previous highlight
+        // standing. This lets the "tap an arrow then release it before the
+        // trigger" pattern still commit the user's choice — they pointed at
+        // a direction and let go, the system should remember.
+        guard !heldArrows.isEmpty else { return }
+
+        // Otherwise: re-resolve from the still-held arrows so diagonals
+        // collapse to whichever cardinal is left holding the line. Hold
+        // up+left then release up → highlight falls back to left.
+        var next: NestedDirection? = Self.resolveDirection(from: heldArrows)
+        if let n = next, state.nested.action(for: n) == nil {
+            next = nil
+        }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.7)) {
+            state.highlighted = next
+        }
     }
 
     private func processArrowDown(_ direction: NestedDirection) {
@@ -386,7 +418,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
     private func showOverlay() {
         if overlay == nil { overlay = OverlayPanel() }
         guard let overlay else { return }
-        let host = NSHostingView(rootView: KeyboardOverlayView(bindings: config.bindings))
+        // Reset any stale pulse from a previous summon before mounting.
+        overlayPulseState.firedKey = nil
+        let host = NSHostingView(rootView: KeyboardOverlayView(
+            bindings: config.bindings,
+            pulseState: overlayPulseState
+        ))
         host.frame = NSRect(x: 0, y: 0, width: overlay.frame.width, height: overlay.frame.height)
         overlay.present(contentView: host)
     }

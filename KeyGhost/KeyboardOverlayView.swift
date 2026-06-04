@@ -1,8 +1,24 @@
 import SwiftUI
 import AppKit
+import Observation
+
+/// Shared state for the chord-fired pulse. The overlay is a cheatsheet for
+/// users still building muscle memory — once the chord fires, a brief green
+/// pulse on the pressed tile confirms KeyGhost saw the press and acted on
+/// it. Power users who already know their bindings will release the trigger
+/// fast enough that the overlay never appeared in the first place, so the
+/// pulse is invisible to them; it only shows up while you're learning.
+@Observable
+final class OverlayPulseState {
+    /// Key letter (uppercase) that just fired. Setting this triggers an
+    /// animation in the matching KeyCellView; AppDelegate clears it back to
+    /// nil after the pulse + overlay dismiss completes.
+    var firedKey: String? = nil
+}
 
 struct KeyboardOverlayView: View {
     let bindings: [KeyBinding]
+    let pulseState: OverlayPulseState
 
     @State private var didAppear = false
 
@@ -43,7 +59,8 @@ struct KeyboardOverlayView: View {
                                 label: key,
                                 binding: lookup[key],
                                 staggerSlot: rowIdx * 10 + colIdx,
-                                didAppear: didAppear
+                                didAppear: didAppear,
+                                pulseState: pulseState
                             )
                         }
                     }
@@ -89,9 +106,11 @@ struct KeyCellView: View {
     let binding: KeyBinding?
     let staggerSlot: Int
     let didAppear: Bool
+    let pulseState: OverlayPulseState
 
     @State private var icon: NSImage?
     @State private var revealed = false
+    @State private var pulsing = false
 
     var body: some View {
         VStack(spacing: 3) {
@@ -107,12 +126,16 @@ struct KeyCellView: View {
         }
         .frame(width: 64, height: 86)
         .background(cellBackground)
-        .scaleEffect(revealed ? 1 : 0.86)
+        .scaleEffect((revealed ? 1 : 0.86) * (pulsing ? 1.07 : 1))
         .opacity(revealed ? 1 : 0)
         .task(id: binding?.bundleId) { loadIcon() }
         .onChange(of: didAppear) { _, appearing in
             guard appearing else { return }
             scheduleReveal()
+        }
+        .onChange(of: pulseState.firedKey) { _, fired in
+            guard fired == label else { return }
+            triggerPulse()
         }
         .onAppear {
             if didAppear { scheduleReveal() }
@@ -125,10 +148,25 @@ struct KeyCellView: View {
         // tile with a 34×34 icon stacks too much blur and washes the icon out.
         let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         shape
-            .fill(binding != nil ? Color.white.opacity(0.16) : Color.white.opacity(0.04))
+            .fill(pulsing
+                  ? Color.green.opacity(0.32)
+                  : (binding != nil ? Color.white.opacity(0.16) : Color.white.opacity(0.04)))
             .overlay(
-                shape.strokeBorder(Color.white.opacity(binding != nil ? 0.20 : 0.06), lineWidth: 1)
+                shape.strokeBorder(
+                    pulsing ? Color.green.opacity(0.95)
+                            : Color.white.opacity(binding != nil ? 0.20 : 0.06),
+                    lineWidth: pulsing ? 2 : 1)
             )
+            .shadow(color: pulsing ? Color.green.opacity(0.55) : .clear, radius: pulsing ? 8 : 0)
+    }
+
+    private func triggerPulse() {
+        // Snap in, then ease back. The peak (~80ms) is what the eye latches
+        // onto — the gentle decay just keeps it from looking like a glitch.
+        withAnimation(.easeOut(duration: 0.08)) { pulsing = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.10) {
+            withAnimation(.easeIn(duration: 0.18)) { pulsing = false }
+        }
     }
 
     @ViewBuilder private var iconView: some View {

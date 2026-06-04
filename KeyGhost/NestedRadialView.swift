@@ -28,12 +28,15 @@ struct NestedRadialView: View {
     @Bindable var state: NestedRadialState
     @State private var didAppear = false
 
-    private static let tileOffset: CGFloat = 130
+    // Tightened from 130 since tiles shrank to base-overlay dimensions (64×86).
+    // Far enough that diagonals don't touch their cardinals, close enough that
+    // the cluster reads as a single rosette instead of eight floating tiles.
+    private static let tileOffset: CGFloat = 118
 
     var body: some View {
         radialCluster
-            .frame(width: 380, height: 380)
-            .padding(40)
+            .frame(width: 320, height: 320)
+            .padding(EdgeInsets(top: 22, leading: 28, bottom: 24, trailing: 28))
             .background(panelBackground)
             .scaleEffect(didAppear ? 1 : 0.92)
             .opacity(didAppear ? 1 : 0)
@@ -116,27 +119,28 @@ struct NestedRadialView: View {
             )
         } else {
             // Empty slot — keep layout consistent so present tiles don't shift.
-            Color.clear.frame(width: NestedTileView.size, height: NestedTileView.size)
+            Color.clear.frame(width: NestedTileView.width, height: NestedTileView.height)
         }
     }
 
     @ViewBuilder
     private var panelBackground: some View {
+        // Matches KeyboardOverlayView.panelBackground (cornerRadius 22, same
+        // material + border opacities) so the nested radial and the main
+        // keyboard overlay read as variants of one surface, not two designs.
         if #available(macOS 26.0, *) {
-            // Liquid Glass: refraction, depth, dynamic light. The container
-            // above lets the surrounding tiles' glass blend into this one.
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(.clear)
-                .glassEffect(.regular, in: .rect(cornerRadius: 28))
+                .glassEffect(.regular, in: .rect(cornerRadius: 22))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                 )
         } else {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
                 )
         }
@@ -144,7 +148,10 @@ struct NestedRadialView: View {
 }
 
 private struct NestedTileView: View {
-    static let size: CGFloat = 96
+    // Dimensions and typography mirror KeyCellView in KeyboardOverlayView so
+    // the nested radial and the base keyboard read as one design language.
+    static let width: CGFloat = 64
+    static let height: CGFloat = 86
 
     let label: String
     let keyHint: String
@@ -161,23 +168,30 @@ private struct NestedTileView: View {
     @State private var pulsing = false
 
     var body: some View {
-        VStack(spacing: 4) {
+        // Layout mirrors KeyCellView: icon → input glyph → semantic label.
+        // The direction arrow plays the same role here that the letter plays
+        // in the base overlay (it's "what you press"), so it gets the same
+        // 11pt monospaced semibold treatment.
+        VStack(spacing: 3) {
             iconView
-            Text(label)
-                .font(.system(size: 11, weight: .semibold))
+            Text(keyHint)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.primary)
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .padding(.horizontal, 4)
-            Text(keyHint)
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 2)
         }
-        .frame(width: Self.size, height: Self.size)
+        .frame(width: Self.width, height: Self.height)
         .background(tileBackground)
         .scaleEffect(currentScale)
         .opacity(revealed ? 1 : 0)
-        .shadow(color: isHighlighted ? Color.accentColor.opacity(0.55) : .clear, radius: 14)
+        // Green glow on the armed tile matches the chord-fired pulse in the
+        // base overlay — green means "this is what KeyGhost will fire on
+        // release" in both UIs, so the visual language stays consistent.
+        .shadow(color: isHighlighted ? Color.green.opacity(0.50) : .clear, radius: 8)
         .animation(.spring(response: 0.32, dampingFraction: 0.72), value: isHighlighted)
         .animation(.spring(response: 0.32, dampingFraction: 0.72), value: pulsing)
         .task(id: bundleId) { loadIcon() }
@@ -198,28 +212,31 @@ private struct NestedTileView: View {
 
     private var currentScale: CGFloat {
         if !revealed { return 0.72 }
-        if isHighlighted { return isCenter ? (pulsing ? 1.05 : 1.0) : 1.10 }
+        if isHighlighted { return isCenter ? (pulsing ? 1.04 : 1.0) : 1.08 }
         return 1.0
     }
 
     @ViewBuilder
     private var tileBackground: some View {
-        // No per-tile glass — Liquid Glass's surface refraction sits over the
-        // tile bounds and washes out the icon. The accent fill + thicker
-        // border on the highlighted tile, plus the outer shadow, do the work.
-        let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
+        // 10pt radius + white-opacity fills match KeyCellView. The "armed"
+        // state swaps in green at the same intensity the chord-fired pulse
+        // uses (0.32 fill / 0.95 border / 2px stroke).
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
         shape
             .fill(plainFill)
             .overlay(shape.strokeBorder(borderColor, lineWidth: isHighlighted ? 2 : 1))
     }
 
     private var plainFill: Color {
-        if isHighlighted { return Color.accentColor.opacity(0.45) }
+        if isHighlighted { return Color.green.opacity(0.32) }
+        // Centre = present (matches base "bound" cell); cardinals = lighter
+        // (matches base "unbound" cell) so the root binding reads as primary.
         return isCenter ? Color.white.opacity(0.16) : Color.white.opacity(0.10)
     }
 
     private var borderColor: Color {
-        isHighlighted ? Color.accentColor.opacity(0.9) : Color.white.opacity(0.18)
+        if isHighlighted { return Color.green.opacity(0.95) }
+        return Color.white.opacity(isCenter ? 0.20 : 0.16)
     }
 
     @ViewBuilder private var iconView: some View {
@@ -227,9 +244,9 @@ private struct NestedTileView: View {
             Image(nsImage: icon)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 40, height: 40)
+                .frame(width: 34, height: 34)
         } else {
-            Color.clear.frame(width: 40, height: 40)
+            Color.clear.frame(width: 34, height: 34)
         }
     }
 
