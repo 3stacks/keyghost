@@ -49,6 +49,14 @@ fi
 echo "→ stage binary"
 cp "$BIN_SRC" "$MACOS/$NAME"
 
+# App icon: the .icns is committed under Bundle/ and referenced by
+# CFBundleIconFile in Info.plist. Copy it into Contents/Resources/ so Finder,
+# the About window, the DMG mount, and Settings all pick it up.
+if [ -f "$ROOT/Bundle/AppIcon.icns" ]; then
+    echo "→ stage AppIcon.icns"
+    cp "$ROOT/Bundle/AppIcon.icns" "$RES/AppIcon.icns"
+fi
+
 # Embed Sparkle.framework alongside the main binary. SPM produces an xcframework
 # under .build/artifacts/sparkle; pick the macos slice.
 SPARKLE_SRC="$ROOT/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
