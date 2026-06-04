@@ -25,6 +25,41 @@ final class BindingsStore {
         replace(bindings: list)
     }
 
+    /// Move the binding at `sourceKey` to `targetKey`. If `targetKey` already
+    /// has a binding, the two are swapped so the interaction is reversible.
+    func move(from sourceKey: String, to targetKey: String) {
+        let upperSource = sourceKey.uppercased()
+        let upperTarget = targetKey.uppercased()
+        guard upperSource != upperTarget else { return }
+        guard let source = config.bindings.first(where: { $0.key.uppercased() == upperSource }) else { return }
+        let target = config.bindings.first(where: { $0.key.uppercased() == upperTarget })
+
+        var list = config.bindings.filter {
+            let k = $0.key.uppercased()
+            return k != upperSource && k != upperTarget
+        }
+        list.append(KeyBinding(
+            key: targetKey,
+            bundleId: source.bundleId,
+            label: source.label,
+            passthrough: source.passthrough,
+            url: source.url,
+            nested: source.nested
+        ))
+        if let target {
+            list.append(KeyBinding(
+                key: sourceKey,
+                bundleId: target.bundleId,
+                label: target.label,
+                passthrough: target.passthrough,
+                url: target.url,
+                nested: target.nested
+            ))
+        }
+        list.sort { $0.key < $1.key }
+        replace(bindings: list)
+    }
+
     func updateTriggerKey(_ key: TriggerKey) {
         config = BindingsConfig(
             holdDelayMs: config.holdDelayMs,

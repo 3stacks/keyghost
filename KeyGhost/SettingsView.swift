@@ -108,6 +108,7 @@ private struct TriggerCaptureButton: View {
 private struct KeyboardEditorGrid: View {
     @Bindable var store: BindingsStore
     @Binding var selectedKey: String?
+    @State private var dropTargetedKey: String? = nil
 
     private static let rows: [[String]] = [
         ["1","2","3","4","5","6","7","8","9","0"],
@@ -116,18 +117,14 @@ private struct KeyboardEditorGrid: View {
         ["Z","X","C","V","B","N","M"]
     ]
 
+    private static let validKeys: Set<String> = Set(rows.flatMap { $0 })
+
     var body: some View {
         VStack(spacing: 6) {
             ForEach(Self.rows.indices, id: \.self) { rowIdx in
                 HStack(spacing: 6) {
                     ForEach(Self.rows[rowIdx], id: \.self) { key in
-                        let appBinding = store.config.bindings.first { $0.key.uppercased() == key }
-                        EditorKeyCell(
-                            label: key,
-                            appBinding: appBinding,
-                            isSelected: selectedKey == key
-                        )
-                        .onTapGesture { selectedKey = key }
+                        cell(for: key)
                     }
                 }
                 .padding(.leading, CGFloat(rowIdx) * 18)
@@ -135,12 +132,49 @@ private struct KeyboardEditorGrid: View {
         }
         .frame(maxWidth: .infinity)
     }
+
+    @ViewBuilder
+    private func cell(for key: String) -> some View {
+        let appBinding = store.config.bindings.first { $0.key.uppercased() == key }
+        let base = EditorKeyCell(
+            label: key,
+            appBinding: appBinding,
+            isSelected: selectedKey == key,
+            isDropTargeted: dropTargetedKey == key
+        )
+        .onTapGesture { selectedKey = key }
+        .dropDestination(for: String.self) { items, _ in
+            handleDrop(items: items, targetKey: key)
+        } isTargeted: { hovering in
+            if hovering {
+                dropTargetedKey = key
+            } else if dropTargetedKey == key {
+                dropTargetedKey = nil
+            }
+        }
+
+        if appBinding != nil {
+            base.draggable(key)
+        } else {
+            base
+        }
+    }
+
+    private func handleDrop(items: [String], targetKey: String) -> Bool {
+        guard let raw = items.first else { return false }
+        let source = raw.uppercased()
+        guard Self.validKeys.contains(source), source != targetKey.uppercased() else { return false }
+        store.move(from: source, to: targetKey)
+        selectedKey = targetKey
+        return true
+    }
 }
 
 private struct EditorKeyCell: View {
     let label: String
     let appBinding: KeyBinding?
     let isSelected: Bool
+    let isDropTargeted: Bool
     @State private var icon: NSImage?
 
     var body: some View {
@@ -162,21 +196,23 @@ private struct EditorKeyCell: View {
                 .fill(bgColor)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(strokeColor, lineWidth: isSelected ? 2 : 1)
+                        .strokeBorder(strokeColor, lineWidth: (isSelected || isDropTargeted) ? 2 : 1)
                 )
         )
         .contentShape(Rectangle())
+        .animation(.easeOut(duration: 0.12), value: isDropTargeted)
         .task(id: appBinding?.bundleId) { loadIcon() }
     }
 
     private var bgColor: Color {
+        if isDropTargeted { return Color.accentColor.opacity(0.4) }
         if isSelected { return Color.accentColor.opacity(0.25) }
         if appBinding != nil { return Color.primary.opacity(0.08) }
         return Color.primary.opacity(0.02)
     }
 
     private var strokeColor: Color {
-        if isSelected { return Color.accentColor }
+        if isDropTargeted || isSelected { return Color.accentColor }
         if appBinding != nil { return Color.primary.opacity(0.18) }
         return Color.primary.opacity(0.08)
     }
