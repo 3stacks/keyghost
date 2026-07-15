@@ -144,7 +144,7 @@ enum BindingsLoader {
     static func load() -> BindingsConfig {
         let url = configURL
         if !FileManager.default.fileExists(atPath: url.path) {
-            seedFromBundle(to: url)
+            seedDefaultConfig(to: url)
         }
         guard let data = try? Data(contentsOf: url),
               let cfg = try? JSONDecoder().decode(BindingsConfig.self, from: data)
@@ -161,10 +161,41 @@ enum BindingsLoader {
         try data.write(to: configURL, options: .atomic)
     }
 
-    private static func seedFromBundle(to dest: URL) {
-        guard let src = Bundle.module.url(forResource: "bindings.example", withExtension: "json"),
-              let data = try? Data(contentsOf: src)
-        else { return }
+    private static func seedDefaultConfig(to dest: URL) {
+        guard let data = exampleConfigJSON.data(using: .utf8) else { return }
         try? data.write(to: dest)
     }
+
+    /// Starter config written to Application Support on first launch.
+    ///
+    /// Embedded as a string literal rather than loaded via `Bundle.module`: for
+    /// an SPM `executableTarget`, the generated `Bundle.module` accessor only
+    /// looks for `KeyGhost_KeyGhost.bundle` next to `Bundle.main.bundleURL` — the
+    /// .app root — which `codesign` refuses to seal, so it crashed on every
+    /// packaged launch. Inlining removes the resource bundle entirely; this
+    /// resolves identically under `swift run`, the signed .app, and tests.
+    ///
+    /// Kept in sync with the human-readable `KeyGhost/Resources/bindings.example.json`.
+    static let exampleConfigJSON = """
+    {
+      "holdDelayMs": 250,
+      "triggerKey": "capsLock",
+      "bindings": [
+        { "key": "T", "bundleId": "com.apple.Terminal", "label": "Terminal" },
+        {
+          "key": "F",
+          "bundleId": "com.google.Chrome",
+          "label": "Chrome",
+          "nested": {
+            "up":    { "bundleId": "com.google.Chrome", "url": "https://mail.google.com",     "label": "Gmail" },
+            "right": { "bundleId": "com.google.Chrome", "url": "https://calendar.google.com", "label": "Calendar" },
+            "down":  { "bundleId": "com.google.Chrome", "url": "https://github.com",          "label": "GitHub" }
+          }
+        },
+        { "key": "C", "bundleId": "com.apple.Calendar", "label": "Calendar" },
+        { "key": "M", "bundleId": "com.apple.mail", "label": "Mail" },
+        { "key": "S", "bundleId": "com.apple.Safari", "label": "Safari" }
+      ]
+    }
+    """
 }

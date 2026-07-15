@@ -72,17 +72,13 @@ cp -R "$SPARKLE_SRC" "$FRAMEWORKS/"
 echo "→ add rpath @executable_path/../Frameworks"
 install_name_tool -add_rpath "@executable_path/../Frameworks" "$MACOS/$NAME" 2>/dev/null || true
 
-# Swift Package resources live in a sibling .bundle next to the executable.
-# Bundle.module also probes Bundle.main.resourceURL, so Contents/Resources/ works
-# inside an .app. .build/release is a symlink so use a glob instead of find.
-shopt -s nullglob
-for b in "$ROOT"/.build/release/*.bundle; do
-    if [ -d "$b" ]; then
-        echo "→ stage resource bundle ($(basename "$b"))"
-        cp -R "$b" "$RES/"
-    fi
-done
-shopt -u nullglob
+# No resource bundle to stage: the only bundled resource (the starter config)
+# is embedded as a string literal in Bindings.swift. Shipping it via SPM's
+# Bundle.module doesn't work here — for an executableTarget the generated
+# accessor only looks for KeyGhost_KeyGhost.bundle next to Bundle.main.bundleURL
+# (the .app root), a location codesign refuses to seal, so the app crashed on
+# launch. If you add a real resource later, place it in Contents/Resources/ and
+# load it via Bundle.main, not Bundle.module.
 
 echo "→ write Info.plist (v$VERSION build $BUILD_NUMBER)"
 sed \
@@ -119,9 +115,8 @@ fi
 echo "    sparkle: Sparkle.framework"
 codesign "${SIGN_ARGS[@]}" "$SPARKLE_FW" 2>&1 | sed 's/^/      /' || true
 
-# Note: SPM's resource bundle is a flat dir with the .bundle suffix and no
-# Info.plist, which codesign won't accept as a sub-bundle. We sign only the
-# main app — the .app signature seals the resource files by hash.
+# Sign the main app last, after its nested Sparkle bundles above. There is no
+# separate resource bundle to sign — the .app signature seals Contents/ by hash.
 if [ "$SIGNING_IDENTITY" = "-" ]; then
     codesign "${SIGN_ARGS[@]}" "$APP" 2>&1 | sed 's/^/    /'
 else

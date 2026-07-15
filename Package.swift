@@ -16,8 +16,14 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "KeyGhost",
-            resources: [
-                .copy("Resources/bindings.example.json")
+            // bindings.example.json is embedded as a string literal in
+            // Bindings.swift (see BindingsLoader.exampleConfigJSON) and kept in
+            // the repo only as human-readable documentation, so exclude it from
+            // the build rather than shipping it as a resource bundle — an SPM
+            // executableTarget's Bundle.module can't be located inside a signed
+            // .app, which crashed the app on launch.
+            exclude: [
+                "Resources/bindings.example.json"
             ]
         ),
     ]
