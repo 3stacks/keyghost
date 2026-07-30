@@ -117,7 +117,11 @@ invocation.
 
 ## Building from source
 
-Requires Xcode 15+ (Swift 5.9, macOS 14 SDK).
+Requires Xcode 26+. The overlay uses Liquid Glass, so the macOS 26 SDK is
+necessary to compile. The build scripts set `DEVELOPER_DIR` to
+`/Applications/Xcode.app/Contents/Developer` for you, because the Command Line
+Tools supply an older SDK. Set `DEVELOPER_DIR` yourself to select a different
+Xcode.
 
 ```sh
 swift run                                 # debug build, run in-place
@@ -227,8 +231,37 @@ gh release create "v$VERSION" \
     --generate-notes
 ```
 
-The notarize step is what takes the most time (~3–10 minutes waiting
-on Apple). Everything else is local.
+The notarize step takes the most time. Apple needs 3 to 10 minutes.
+Everything else is local.
+
+`upload-r2.sh` needs the R2 S3 keys in `.env`. Without them, upload the two
+objects with `wrangler` instead. An account-level `wrangler login` is enough,
+and no S3 keys are necessary:
+
+```sh
+bunx wrangler r2 object put "keyghost/KeyGhost-$VERSION.dmg" \
+    --file="build/KeyGhost-$VERSION.dmg" \
+    --content-type=application/x-apple-diskimage --remote
+
+bunx wrangler r2 object put keyghost/appcast.xml \
+    --file=build/appcast.xml --content-type=application/xml \
+    --cache-control="no-cache, max-age=0" --remote
+```
+
+Upload the DMG first. The appcast points at it, so the object must exist first.
+
+### If the Sparkle key changes
+
+The appcast key is separate from the Apple Developer ID. Sign the appcast with
+the original EdDSA key, and installs update in place even after the Developer ID
+changes. Export that key with `generate_keys -x` and keep it safe.
+
+If you lose the EdDSA key, older installs cannot check any new build. Publish an
+appcast item with no `enclosure` for that release. Sparkle then treats the item
+as information only, and it shows the `<link>` target instead of a download.
+Tell users to install by hand. A new Developer ID also resets the Accessibility
+and Input Monitoring grants, so users must grant both again. Release 1.0.0 is
+the worked example.
 
 ## Layout
 

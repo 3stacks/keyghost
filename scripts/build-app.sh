@@ -11,6 +11,15 @@ if [ -f "$ROOT/.env" ]; then
     set -a; source "$ROOT/.env"; set +a
 fi
 
+# The Liquid Glass views (glassEffect, GlassEffectContainer, Glass) need the
+# macOS 26 SDK. On a machine where xcode-select points at CommandLineTools, only
+# the older SDK is available and the build fails to compile. Prefer Xcode's
+# toolchain, but respect DEVELOPER_DIR if the caller already set it.
+if [ -z "${DEVELOPER_DIR:-}" ] && [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+    export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+    echo "→ DEVELOPER_DIR=$DEVELOPER_DIR"
+fi
+
 NAME="KeyGhost"
 VERSION="${VERSION:-0.1.0}"
 BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
