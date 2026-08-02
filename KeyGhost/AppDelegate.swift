@@ -437,11 +437,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
 
     @objc private func showSettings() {
         if settingsWindow == nil {
-            let view = SettingsView(store: store)
+            let view = SettingsView(store: store, onClose: { [weak self] in
+                self?.settingsWindow?.close()
+            })
             let host = NSHostingController(rootView: view)
             let win = NSWindow(contentViewController: host)
             win.title = "KeyGhost Settings"
-            win.styleMask = [.titled, .closable, .miniaturizable]
+            win.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            win.setContentSize(NSSize(width: 760, height: 720))
             win.center()
             win.isReleasedWhenClosed = false
             settingsWindow = win
