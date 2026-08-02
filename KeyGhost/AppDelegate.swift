@@ -203,14 +203,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         guard let binding = result.binding else { return .passthrough }
 
         // A binding with nested options doesn't fire immediately — it opens the
-        // radial overlay and waits for arrow + trigger-release to commit.
+        // radial rosette and waits for arrow + trigger-release to commit. If
+        // the keyboard overlay is up it stays up: the pressed key pulses and
+        // the rosette blooms out of that key's cell.
         if let nested = binding.nested, nested.hasAny {
             DispatchQueue.main.async {
-                // Cancel any in-flight hold timer / dismiss the main keyboard
-                // overlay — the radial replaces both.
                 self.holdWorkItem?.cancel()
                 self.holdWorkItem = nil
-                self.didShowOverlay = false
+                if self.didShowOverlay {
+                    self.overlayPulseState.firedKey = letter
+                }
                 self.enterNestedMode(letter: letter, binding: binding, nested: nested)
             }
             return .swallow
@@ -283,7 +285,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         }
         let state = NestedRadialState(rootKey: letter, rootBinding: binding, nested: nested, highlighted: nil)
         nestedState = state
-        presentRadial(state: state)
+        if didShowOverlay {
+            // Keyboard overlay is up — anchor the rosette to the pressed key
+            // inside it rather than replacing the whole overlay.
+            overlayPulseState.nestedState = state
+        } else {
+            presentRadial(state: state)
+        }
     }
 
     private func processArrowUp(_ direction: NestedDirection) {
@@ -365,6 +373,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         let state = nestedState
         nestedState = nil
         heldArrows.removeAll()
+        overlayPulseState.nestedState = nil
+        overlayPulseState.firedKey = nil
         if execute, let state {
             commitNestedSelection(binding: state.rootBinding, direction: state.highlighted)
         }
@@ -394,7 +404,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         if overlay == nil { overlay = OverlayPanel() }
         guard let overlay else { return }
         let host = NSHostingView(rootView: NestedRadialView(state: state))
-        host.frame = NSRect(x: 0, y: 0, width: overlay.frame.width, height: overlay.frame.height)
         overlay.present(contentView: host)
     }
 
@@ -420,11 +429,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency SPUSta
         guard let overlay else { return }
         // Reset any stale pulse from a previous summon before mounting.
         overlayPulseState.firedKey = nil
+        // Explicit fill-frame so the fixed-size keyboard panel centres in the
+        // screen-sized hosting view (matches NestedRadialView's own wrapper).
         let host = NSHostingView(rootView: KeyboardOverlayView(
             bindings: config.bindings,
             pulseState: overlayPulseState
-        ))
-        host.frame = NSRect(x: 0, y: 0, width: overlay.frame.width, height: overlay.frame.height)
+        ).frame(maxWidth: .infinity, maxHeight: .infinity))
         overlay.present(contentView: host)
     }
 

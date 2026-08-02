@@ -2,10 +2,11 @@ import AppKit
 
 final class OverlayPanel: NSPanel {
     init() {
-        // 960×680 is sized to comfortably hold both layouts the panel hosts:
-        // the keyboard overlay (~820 wide) plus its shadow, and the larger
-        // nested radial (~620 across including the outermost tile bounds and
-        // its glow). Centered on screen by the panel placement code below.
+        // Placeholder rect — present() resizes the panel to the full usable
+        // screen. The window must cover the whole screen because content is
+        // clipped at the window bounds: a rosette anchored to a bottom-row
+        // key reaches ~183pt below the keyboard panel and was losing its ↓
+        // tile to the old fixed 960×680 frame.
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 960, height: 680),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -23,13 +24,16 @@ final class OverlayPanel: NSPanel {
     }
 
     func present(contentView view: NSView) {
-        contentView = view
+        // Size the window BEFORE installing the content view, then size the
+        // view to match explicitly — autoresizing alone left a stale
+        // pre-resize frame pinned to one corner, which both mis-centred the
+        // content and clipped anything past the old bounds.
         if let screen = NSScreen.main {
-            let f = screen.visibleFrame
-            let w = frame.width
-            let h = frame.height
-            setFrame(NSRect(x: f.midX - w / 2, y: f.midY - h / 2, width: w, height: h), display: true)
+            setFrame(screen.visibleFrame, display: false)
         }
+        view.frame = NSRect(origin: .zero, size: contentRect(forFrameRect: frame).size)
+        view.autoresizingMask = [.width, .height]
+        contentView = view
         alphaValue = 0
         orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { ctx in

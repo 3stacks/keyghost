@@ -20,20 +20,12 @@ final class NestedRadialState {
     }
 }
 
-/// Cross-shaped overlay shown while a chord key with `nested` bindings is held.
-/// The root binding sits in the centre; up/right/down/left tiles surround it.
-/// Releasing the trigger executes either the highlighted direction's action
-/// or the root binding if no direction was chosen.
+/// Full-screen wrapper for radial-only sessions (chord landed before the
+/// keyboard overlay appeared). Centres the rosette in the OverlayPanel.
+/// When the keyboard overlay is up, KeyboardOverlayView embeds
+/// NestedRadialClusterView directly, anchored to the pressed key.
 struct NestedRadialView: View {
     @Bindable var state: NestedRadialState
-    @State private var didAppear = false
-
-    // Compass radius from centre to each cardinal tile. Diagonals sit at
-    // r * 0.7071 on each axis so all 8 directions land on the same circle —
-    // angular spacing is uniform 45°, and the cluster reads as a true rosette.
-    // 180 keeps a comfortable ~85 px gap between adjacent tile edges, so the
-    // ring feels open instead of crammed.
-    private static let tileOffset: CGFloat = 180
 
     var body: some View {
         // ZStack with a clear background fills the hosting view, which lets
@@ -41,31 +33,62 @@ struct NestedRadialView: View {
         // it to the top-leading.
         ZStack {
             Color.clear
-            radialCluster
-                .frame(width: 520, height: 520)
-                .padding(36)
-                .background(panelBackground)
-                .scaleEffect(didAppear ? 1 : 0.92)
-                .opacity(didAppear ? 1 : 0)
+            NestedRadialClusterView(state: state)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-            // Spring the whole panel in. Tiles stagger from there.
-            withAnimation(.spring(response: 0.22, dampingFraction: 0.78)) {
-                didAppear = true
+    }
+}
+
+/// Cross-shaped rosette shown while a chord key with `nested` bindings is
+/// held. The root binding sits in the centre; the 8 direction tiles pop in
+/// around it. Releasing the trigger executes either the highlighted
+/// direction's action or the root binding if no direction was chosen.
+struct NestedRadialClusterView: View {
+    @Bindable var state: NestedRadialState
+    @State private var didAppear = false
+    /// Slots (indices into `layoutOrder`) that already popped in. Tiles wait
+    /// at their final positions, hidden, until their stagger turn comes.
+    @State private var revealedSlots: Set<Int> = []
+
+    // Ring tiles sit one key-pitch from the centre on a 3×3 grid — the same
+    // 8pt gaps as the keyboard overlay — so anchored on a key, the rosette
+    // occupies exactly where that key's neighbours are.
+    private static let pitchX: CGFloat = NestedTileView.width + 8
+    private static let pitchY: CGFloat = NestedTileView.height + 8
+
+    var body: some View {
+        // No shared panel behind the rosette — the tiles float free, each
+        // carrying its own surface, echoing the key cells in Settings.
+        radialCluster
+            .frame(
+                width: NestedTileView.width + Self.pitchX * 2,
+                height: NestedTileView.height + Self.pitchY * 2
+            )
+            .opacity(didAppear ? 1 : 0)
+            .onAppear {
+                // Centre tile snaps in, then the ring tiles pop in place with
+                // a fast clockwise sweep from north — crisp, no drift.
+                withAnimation(.spring(response: 0.18, dampingFraction: 0.85)) {
+                    didAppear = true
+                }
+                for slot in Self.layoutOrder.indices {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.04 + Double(slot) * 0.025) {
+                        withAnimation(.spring(response: 0.18, dampingFraction: 0.85)) {
+                            _ = revealedSlots.insert(slot)
+                        }
+                    }
+                }
             }
-        }
     }
 
     @ViewBuilder
     private var radialCluster: some View {
         if #available(macOS 26.0, *) {
             // Spacing controls how aggressively neighbouring tiles' glass
-            // surfaces merge — larger value = more discrete tiles. At the new
-            // tile-offset of 180 the tiles never quite touch, but raising
-            // spacing keeps each one optically distinct rather than melting
-            // into a single blob.
-            GlassEffectContainer(spacing: 28) {
+            // surfaces merge. On the snug key-pitch grid the gaps are only
+            // 8pt, so keep the merge distance below that — the tiles must
+            // stay discrete cells, not melt into one blob.
+            GlassEffectContainer(spacing: 4) {
                 clusterContent
             }
         } else {
@@ -81,29 +104,33 @@ struct NestedRadialView: View {
     ]
 
     private var clusterContent: some View {
+        // Ring tiles sit at their final grid positions from the start and
+        // pop in place — no slide, just a quick staggered scale + fade.
         ZStack {
             ForEach(Array(Self.layoutOrder.enumerated()), id: \.element) { slot, direction in
-                tile(direction: direction, action: state.nested.action(for: direction), slot: slot)
+                let revealed = revealedSlots.contains(slot)
+                tile(direction: direction, action: state.nested.action(for: direction))
                     .offset(offset(for: direction))
+                    .scaleEffect(revealed ? 1 : 0.9)
+                    .opacity(revealed ? 1 : 0)
             }
             centerTile
+                .scaleEffect(didAppear ? 1 : 0.9)
         }
     }
 
     private func offset(for direction: NestedDirection) -> CGSize {
-        let r = Self.tileOffset
-        // sin(45°) ≈ 0.7071 — equal radial distance for cardinals and diagonals,
-        // so the cluster reads as an even compass rose.
-        let d = r * 0.7071
+        let x = Self.pitchX
+        let y = Self.pitchY
         switch direction {
-        case .up: return CGSize(width: 0, height: -r)
-        case .upRight: return CGSize(width: d, height: -d)
-        case .right: return CGSize(width: r, height: 0)
-        case .downRight: return CGSize(width: d, height: d)
-        case .down: return CGSize(width: 0, height: r)
-        case .downLeft: return CGSize(width: -d, height: d)
-        case .left: return CGSize(width: -r, height: 0)
-        case .upLeft: return CGSize(width: -d, height: -d)
+        case .up: return CGSize(width: 0, height: -y)
+        case .upRight: return CGSize(width: x, height: -y)
+        case .right: return CGSize(width: x, height: 0)
+        case .downRight: return CGSize(width: x, height: y)
+        case .down: return CGSize(width: 0, height: y)
+        case .downLeft: return CGSize(width: -x, height: y)
+        case .left: return CGSize(width: -x, height: 0)
+        case .upLeft: return CGSize(width: -x, height: -y)
         }
     }
 
@@ -113,50 +140,23 @@ struct NestedRadialView: View {
             keyHint: state.rootKey,
             bundleId: state.rootBinding.bundleId,
             isHighlighted: state.highlighted == nil,
-            isCenter: true,
-            staggerSlot: -1,
-            didAppear: didAppear
+            isCenter: true
         )
     }
 
     @ViewBuilder
-    private func tile(direction: NestedDirection, action: NestedAction?, slot: Int) -> some View {
+    private func tile(direction: NestedDirection, action: NestedAction?) -> some View {
         if let action {
             NestedTileView(
                 label: action.label ?? direction.shortName,
                 keyHint: direction.glyph,
                 bundleId: action.bundleId,
                 isHighlighted: state.highlighted == direction,
-                isCenter: false,
-                staggerSlot: slot,
-                didAppear: didAppear
+                isCenter: false
             )
         } else {
             // Empty slot — keep layout consistent so present tiles don't shift.
             Color.clear.frame(width: NestedTileView.width, height: NestedTileView.height)
-        }
-    }
-
-    @ViewBuilder
-    private var panelBackground: some View {
-        // 32pt radius scales with the larger 520×520 cluster (was 22pt at
-        // 320×320). Same material language as KeyboardOverlayView so the two
-        // panels still read as one design family even at different sizes.
-        if #available(macOS 26.0, *) {
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .fill(.clear)
-                .glassEffect(.regular, in: .rect(cornerRadius: 32))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 32, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        } else {
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 32, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
-                )
         }
     }
 }
@@ -172,14 +172,11 @@ private struct NestedTileView: View {
     let bundleId: String?
     let isHighlighted: Bool
     let isCenter: Bool
-    /// -1 for the centre tile; 0–3 for the cardinal directions in N, E, S, W
-    /// order. Used to stagger entrance so tiles fade in 40ms apart.
-    let staggerSlot: Int
-    let didAppear: Bool
 
     @State private var icon: NSImage?
-    @State private var revealed = false
 
+    // Entrance (the bloom out of the centre tile) is driven by the parent
+    // rosette — this view only renders content, surface, and the armed state.
     var body: some View {
         tileContent
             .frame(width: Self.width, height: Self.height)
@@ -187,8 +184,6 @@ private struct NestedTileView: View {
                 isHighlighted: isHighlighted,
                 isCenter: isCenter
             ))
-            .scaleEffect(currentScale)
-            .opacity(revealed ? 1 : 0)
             // Green glow on the armed tile matches the chord-fired pulse in
             // the base overlay — green means "this is what KeyGhost will
             // fire on release" in both UIs, so the visual language stays
@@ -196,21 +191,6 @@ private struct NestedTileView: View {
             .shadow(color: isHighlighted ? Color.green.opacity(0.50) : .clear, radius: 8)
             .animation(.spring(response: 0.32, dampingFraction: 0.72), value: isHighlighted)
             .task(id: bundleId) { loadIcon() }
-            .onChange(of: didAppear) { _, appearing in
-                guard appearing else { return }
-                scheduleReveal()
-            }
-            .onAppear {
-                if didAppear { scheduleReveal() }
-            }
-    }
-
-    private var currentScale: CGFloat {
-        // Only the entrance animation scales tiles. Once revealed they stay
-        // at 1.0 — the green glass tint + thicker border already signal the
-        // armed state, and growing a tile under your eyes was distracting
-        // (it pulled focus away from the action you were about to commit).
-        revealed ? 1.0 : 0.72
     }
 
     // Layout mirrors KeyCellView: icon → input glyph → semantic label. The
@@ -253,16 +233,6 @@ private struct NestedTileView: View {
         }
     }
 
-    private func scheduleReveal() {
-        // Centre reveals first, then N → E → S → W staggered (~25ms apart).
-        let delaySteps = max(staggerSlot, 0)
-        let delay = 0.02 + Double(delaySteps) * 0.025
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            withAnimation(.spring(response: 0.24, dampingFraction: 0.78)) {
-                self.revealed = true
-            }
-        }
-    }
 }
 
 /// Tile surface: glass-behind-content on macOS 26, solid fill on earlier
@@ -276,16 +246,23 @@ private struct TileSurface: ViewModifier {
     let isHighlighted: Bool
     let isCenter: Bool
 
+    // 8pt continuous radius matches the key cells in the Settings editor, so
+    // the live radial and the editor read as one design language.
+    private static let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+
     func body(content: Content) -> some View {
         if #available(macOS 26.0, *) {
             content
-                .glassEffect(tileGlass, in: .rect(cornerRadius: 10))
+                .glassEffect(tileGlass, in: .rect(cornerRadius: 8))
                 .overlay(borderShape)
         } else {
+            // Without the shared panel each tile needs its own material to
+            // stay readable over arbitrary desktop content.
             content
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    Self.shape
                         .fill(plainFill)
+                        .background(.ultraThinMaterial, in: Self.shape)
                 )
                 .overlay(borderShape)
         }
@@ -311,8 +288,8 @@ private struct TileSurface: ViewModifier {
     }
 
     private var borderShape: some View {
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .strokeBorder(borderColor, lineWidth: isHighlighted ? 2 : 0.5)
+        Self.shape
+            .strokeBorder(borderColor, lineWidth: isHighlighted ? 2 : 1)
     }
 }
 

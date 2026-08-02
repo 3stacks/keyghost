@@ -14,6 +14,19 @@ final class OverlayPulseState {
     /// animation in the matching KeyCellView; AppDelegate clears it back to
     /// nil after the pulse + overlay dismiss completes.
     var firedKey: String? = nil
+    /// Nested radial session anchored to a key on this overlay. While set,
+    /// the keyboard dims and the rosette blooms out of the pressed key's
+    /// cell instead of replacing the whole overlay.
+    var nestedState: NestedRadialState? = nil
+}
+
+/// Collects each key cell's bounds so the nested rosette can be positioned
+/// exactly over the pressed key.
+private struct KeyFramesKey: PreferenceKey {
+    static let defaultValue: [String: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue()) { $1 }
+    }
 }
 
 struct KeyboardOverlayView: View {
@@ -34,11 +47,30 @@ struct KeyboardOverlayView: View {
     }
 
     var body: some View {
+        let radialUp = pulseState.nestedState != nil
         content
             .padding(EdgeInsets(top: 22, leading: 28, bottom: 24, trailing: 28))
             .background(panelBackground)
             .scaleEffect(didAppear ? 1 : 0.94)
             .opacity(didAppear ? 1 : 0)
+            // The rosette layer sits above the keyboard and is positioned over
+            // the pressed key. It draws past the panel's bounds when the key
+            // is near an edge — overlays don't clip, and the hosting view is
+            // the full screen.
+            .overlayPreferenceValue(KeyFramesKey.self) { frames in
+                GeometryReader { proxy in
+                    if let state = pulseState.nestedState,
+                       let anchor = frames[state.rootKey.uppercased()] {
+                        let rect = proxy[anchor]
+                        NestedRadialClusterView(state: state)
+                            // Fresh identity per session so the bloom replays
+                            // when the user switches to another nested key.
+                            .id(ObjectIdentifier(state))
+                            .position(x: rect.midX, y: rect.midY)
+                    }
+                }
+            }
+            .animation(.easeOut(duration: 0.18), value: radialUp)
             .onAppear {
                 withAnimation(.spring(response: 0.22, dampingFraction: 0.8)) {
                     didAppear = true
@@ -62,12 +94,16 @@ struct KeyboardOverlayView: View {
                                 didAppear: didAppear,
                                 pulseState: pulseState
                             )
+                            .anchorPreference(key: KeyFramesKey.self, value: .bounds) { [key: $0] }
                         }
                     }
                     .padding(.leading, CGFloat(rowIdx) * 22)
                 }
             }
         }
+        // Dim the cheatsheet while the rosette is up so the directional binds
+        // read clearly over the neighbouring keys.
+        .opacity(pulseState.nestedState != nil ? 0.35 : 1)
     }
 
     private var hyperBadge: some View {
